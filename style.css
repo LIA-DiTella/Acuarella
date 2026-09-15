@@ -1,5 +1,8 @@
 :root {
   --accent: #29f0ff;
+  --lock: #ffd23f;
+  --ok: #3dff8a;
+  --bad: #ff8a8a;
   --bg: #03121c;
   --fg: #e8f7fb;
   --muted: #8fb3bf;
@@ -20,6 +23,9 @@ html, body {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
 }
 #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#overlay .track { fill: none; stroke: var(--lock); stroke-linejoin: round; }
+#overlay[data-state="cooldown"] .track { stroke: var(--ok); }
+#overlay[data-state="locked"] .target, #overlay[data-state="cooldown"] .target { stroke-opacity: .2; }
 
 .top {
   position: fixed; top: 0; left: 0; right: 0;
@@ -35,15 +41,26 @@ html, body {
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #012; }
 #version { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
-#hint {
-  position: fixed; left: 0; right: 0; margin: 0; padding: 0 16px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 116px);
-  text-align: center; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none;
+#status {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 124px);
+  max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 6px 14px 8px; border-radius: 999px; background: rgba(0, 0, 0, .6);
+  font-size: 13px; pointer-events: none;
 }
-.toggle {
-  position: fixed; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 46px);
-  display: flex; gap: 6px; align-items: center; font-size: 13px; text-shadow: 0 1px 3px #000;
+#progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: var(--lock); transform: scaleX(0); transform-origin: left; transition: transform .12s linear;
 }
+#status[data-state="cooldown"] #progress { background: var(--ok); }
+
+.toggles {
+  position: fixed; right: calc(env(safe-area-inset-right, 0px) + 14px); bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  font-size: 13px; text-shadow: 0 1px 3px #000;
+}
+.toggles label { display: flex; gap: 6px; align-items: center; }
+
 #shutter {
   position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
   width: 76px; height: 76px; border-radius: 50%; transform: translateX(-50%);
@@ -52,11 +69,23 @@ html, body {
 #shutter:active { transform: translateX(-50%) scale(.92); }
 #shutter:disabled { opacity: .4; }
 
+.card {
+  position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  width: 104px; display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  border: 1px solid rgba(255, 255, 255, .25); border-radius: 12px; background: rgba(0, 0, 0, .65);
+  font-size: 11px; line-height: 1.25; overflow-wrap: anywhere;
+}
+.card[data-kind="ok"] { border-color: var(--ok); }
+.card[data-kind="error"] { border-color: var(--bad); }
+.card img { width: 100%; aspect-ratio: 1600 / 919; object-fit: contain; cursor: pointer; }
+.link { align-self: flex-start; border: 0; padding: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; }
+
 @media (orientation: landscape) {
   #shutter { left: auto; bottom: auto; top: 50%; right: calc(env(safe-area-inset-right, 0px) + 20px); transform: translateY(-50%); }
   #shutter:active { transform: translateY(-50%) scale(.92); }
-  #hint { bottom: calc(env(safe-area-inset-bottom, 0px) + 6px); }
-  .toggle { bottom: calc(env(safe-area-inset-bottom, 0px) + 6px); right: calc(env(safe-area-inset-right, 0px) + 16px); }
+  #status { bottom: calc(env(safe-area-inset-bottom, 0px) + 4px); }
+  .toggles { bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+  .card { left: auto; bottom: auto; right: calc(env(safe-area-inset-right, 0px) + 10px); top: calc(env(safe-area-inset-top, 0px) + 50px); width: 96px; }
 }
 
 #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .3s; }
@@ -73,7 +102,7 @@ html, body {
 .panel p { margin: 0; max-width: 34em; color: var(--muted); }
 .panel .small { font-size: 13px; }
 .panel a { color: var(--accent); }
-#error { color: #ff8a8a; min-height: 1.4em; }
+#error { color: var(--bad); min-height: 1.4em; }
 
 #resultImg { max-width: 100%; max-height: 62vh; filter: drop-shadow(0 8px 24px rgba(0, 0, 0, .5)); }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }

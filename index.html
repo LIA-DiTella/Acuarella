@@ -12,30 +12,40 @@
 <main id="stage">
   <video id="video" playsinline muted autoplay></video>
   <canvas id="testCanvas" hidden></canvas>
-  <svg id="overlay" aria-hidden="true"></svg>
+  <svg id="overlay" data-state="searching" aria-hidden="true"></svg>
 </main>
 
 <header class="top">
   <div id="chips" role="group" aria-label="Plantilla"></div>
   <span id="version"></span>
 </header>
-<p id="hint">Alineá el contorno celeste con el borde grueso del pez</p>
-<label class="toggle"><input type="checkbox" id="whiten" checked> Blanquear</label>
+<div id="status" data-state="searching" role="status"><span id="statusText">Acercá la hoja al contorno celeste</span><i id="progress"></i></div>
+
+<div id="card" class="card" hidden>
+  <img id="cardImg" alt="Última captura (tocá para ver)">
+  <span id="cardText"></span>
+  <button id="cardRetry" class="link" hidden>Reintentar</button>
+</div>
+
+<div class="toggles">
+  <label><input type="checkbox" id="auto" checked> Auto</label>
+  <label><input type="checkbox" id="whiten" checked> Blanquear</label>
+</div>
 <button id="shutter" aria-label="Capturar" disabled></button>
 <div id="flash"></div>
 
 <section id="start" class="panel">
   <h1>Escáner de peces</h1>
-  <p>Poné la hoja sobre una superficie plana y bien iluminada. Sostené el teléfono paralelo a la hoja y hacé coincidir el contorno celeste con el borde grueso del pez.</p>
+  <p>Poné la hoja sobre una superficie plana y bien iluminada. Acercá el teléfono hasta que el contorno celeste quede sobre el borde grueso del pez: se engancha solo y captura cuando está quieto.</p>
   <button id="startBtn" class="btn primary">Iniciar cámara</button>
   <p id="error" role="alert"></p>
-  <p class="small"><a id="pdfLink" href="#" target="_blank">Plantilla para imprimir (PDF)</a></p>
+  <p class="small"><a id="pdfLink" href="#" target="_blank">Plantilla para imprimir (PDF)</a> · <a href="aquarium.html">Ver acuario</a></p>
 </section>
 
 <section id="result" class="panel" hidden>
   <img id="resultImg" alt="Pez escaneado">
   <div class="actions">
-    <button id="retry" class="btn">Repetir</button>
+    <button id="closeResult" class="btn">Cerrar</button>
     <a id="download" class="btn" download>Descargar</a>
     <button id="share" class="btn primary" hidden>Compartir</button>
   </div>
