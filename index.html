@@ -16,8 +16,7 @@
 </main>
 
 <header class="top">
-  <div id="chips" role="group" aria-label="Plantilla"></div>
-  <span id="version"></span>
+  <div id="chips" role="group" aria-label="Especie"></div>
 </header>
 <div id="status" data-state="searching" role="status"><span id="statusText">Acercá la hoja al contorno celeste</span><i id="progress"></i></div>
 
@@ -28,7 +27,7 @@
 </div>
 
 <div class="toggles">
-  <label><input type="checkbox" id="auto" checked> Auto</label>
+  <label><input type="checkbox" id="auto" checked> Autocaptura</label>
   <label><input type="checkbox" id="whiten" checked> Blanquear</label>
 </div>
 <button id="shutter" aria-label="Capturar" disabled></button>
@@ -36,10 +35,11 @@
 
 <section id="start" class="panel">
   <h1>Escáner de peces</h1>
-  <p>Poné la hoja sobre una superficie plana y bien iluminada. Acercá el teléfono hasta que el contorno celeste quede sobre el borde grueso del pez: se engancha solo y captura cuando está quieto.</p>
+  <p>Poné la hoja sobre una superficie plana y bien iluminada. Acercá el teléfono hasta que el contorno quede sobre el borde grueso del pez: la especie se detecta sola y captura cuando está quieto.</p>
   <button id="startBtn" class="btn primary">Iniciar cámara</button>
   <p id="error" role="alert"></p>
-  <p class="small"><a id="pdfLink" href="#" target="_blank">Plantilla para imprimir (PDF)</a> · <a href="aquarium.html">Ver acuario</a></p>
+  <p class="small"><a id="pdfLink" href="#" target="_blank">Plantillas para imprimir (PDF)</a> · <a href="aquarium.html">Ver acuario</a></p>
+  <p class="small" id="version"></p>
 </section>
 
 <section id="result" class="panel" hidden>

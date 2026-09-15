@@ -35,6 +35,11 @@ html, body {
 }
 #chips { display: flex; gap: 6px; overflow-x: auto; flex: 1; scrollbar-width: none; }
 .chip[data-detected="true"] { border-color: var(--lock); box-shadow: inset 0 0 0 1px var(--lock); }
+@media (max-width: 480px) {
+  .top { padding-left: calc(env(safe-area-inset-left, 0px) + 8px); padding-right: calc(env(safe-area-inset-right, 0px) + 8px); }
+  #chips { gap: 4px; }
+  #chips .chip { flex: 1 1 auto; padding: 8px 6px; font-size: 14px; }
+}
 .chip {
   border: 1px solid rgba(255, 255, 255, .35); background: rgba(0, 0, 0, .35); color: var(--fg);
   border-radius: 999px; padding: 9px 15px; font: inherit; font-weight: 600; white-space: nowrap; min-height: 40px;
