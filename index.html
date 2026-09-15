@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#03121c">
+<title>DiTella Scanner</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="testCanvas" hidden></canvas>
+  <svg id="overlay" aria-hidden="true"></svg>
+</main>
+
+<header class="top">
+  <div id="chips" role="group" aria-label="Plantilla"></div>
+  <span id="version"></span>
+</header>
+<p id="hint">Alineá el contorno celeste con el borde grueso del pez</p>
+<label class="toggle"><input type="checkbox" id="whiten" checked> Blanquear</label>
+<button id="shutter" aria-label="Capturar" disabled></button>
+<div id="flash"></div>
+
+<section id="start" class="panel">
+  <h1>Escáner de peces</h1>
+  <p>Poné la hoja sobre una superficie plana y bien iluminada. Sostené el teléfono paralelo a la hoja y hacé coincidir el contorno celeste con el borde grueso del pez.</p>
+  <button id="startBtn" class="btn primary">Iniciar cámara</button>
+  <p id="error" role="alert"></p>
+  <p class="small"><a id="pdfLink" href="#" target="_blank">Plantilla para imprimir (PDF)</a></p>
+</section>
+
+<section id="result" class="panel" hidden>
+  <img id="resultImg" alt="Pez escaneado">
+  <div class="actions">
+    <button id="retry" class="btn">Repetir</button>
+    <a id="download" class="btn" download>Descargar</a>
+    <button id="share" class="btn primary" hidden>Compartir</button>
+  </div>
+</section>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
