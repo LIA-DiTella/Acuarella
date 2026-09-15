@@ -2,18 +2,17 @@
 """Extrae de un PDF de plantilla (A4) el contorno del pez y el marco, en milímetros.
 
 Uso:
-  python3 tools/extract_template.py ~/Downloads/pirana.pdf pirana "Piraña roja"
+  python3 tools/extract_template.py plantillas.pdf bonito "Bonito del Atlántico" --page 2
 
-Genera (y registra la plantilla en templates/index.json):
+Genera (y registra la plantilla en templates/index.json, conservando los campos que ya tuviera):
   templates/<id>.json          línea media del borde grueso del pez, marco, grosor del trazo
-  templates/<id>.pdf           copia del PDF para imprimir desde la web
+  templates/<id>.pdf           la página de esa especie, para imprimir desde la web
   templates/<id>_page.png      render de la página (lo usa el modo ?test=1)
   templates/<id>_preview.png   contorno detectado en rojo sobre la página, para revisar a ojo
 """
 import argparse
 import json
 import pathlib
-import shutil
 import subprocess
 import tempfile
 
@@ -25,11 +24,11 @@ MM = 25.4 / DPI  # milímetros por píxel
 TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "templates"
 
 
-def render(pdf):
+def render(pdf, page):
     with tempfile.TemporaryDirectory() as tmp:
         out = pathlib.Path(tmp) / "page"
         subprocess.run(
-            ["pdftoppm", "-r", str(DPI), "-f", "1", "-l", "1", "-singlefile", "-gray", "-png", str(pdf), str(out)],
+            ["pdftoppm", "-r", str(DPI), "-f", str(page), "-l", str(page), "-singlefile", "-gray", "-png", str(pdf), str(out)],
             check=True,
         )
         return cv2.imread(f"{out}.png", cv2.IMREAD_GRAYSCALE)
@@ -80,9 +79,10 @@ def main():
     ap.add_argument("pdf")
     ap.add_argument("id")
     ap.add_argument("name")
+    ap.add_argument("--page", type=int, default=1, help="página del PDF (empieza en 1)")
     args = ap.parse_args()
 
-    gray = render(args.pdf)
+    gray = render(args.pdf, args.page)
     frame = find_frame(gray)
     sil, dt, thick, (ox, oy) = find_fish(gray, frame)
 
@@ -108,7 +108,9 @@ def main():
 
     TEMPLATES.mkdir(exist_ok=True)
     (TEMPLATES / f"{args.id}.json").write_text(json.dumps(data, ensure_ascii=False, indent=1))
-    shutil.copyfile(args.pdf, TEMPLATES / f"{args.id}.pdf")
+    pdf_out = TEMPLATES / f"{args.id}.pdf"
+    pdf_out.unlink(missing_ok=True)
+    subprocess.run(["pdfseparate", "-f", str(args.page), "-l", str(args.page), str(args.pdf), str(pdf_out)], check=True)
 
     half = cv2.resize(gray, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(TEMPLATES / f"{args.id}_page.png"), half, [cv2.IMWRITE_PNG_COMPRESSION, 9])
@@ -121,7 +123,11 @@ def main():
 
     index_path = TEMPLATES / "index.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else []
-    index = [t for t in index if t["id"] != args.id] + [{"id": args.id, "name": args.name}]
+    entry = {"id": args.id, "name": args.name}
+    if any(t["id"] == args.id for t in index):
+        index = [{**t, **entry} if t["id"] == args.id else t for t in index]
+    else:
+        index.append(entry)
     index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1))
 
     print(f"{args.id}: {len(pts)} puntos, trazo {data['stroke']} mm, marco {data['frame']}, bbox {data['bbox']}")

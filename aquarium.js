@@ -27,28 +27,27 @@ resize();
 
 // --- Datos
 
-const lengths = new Map(); // mm del pez impreso, por especie: da el tamaño relativo entre especies
+// Por especie, desde templates/index.json: scale (largo relativo a la piraña), speed y wave (ondulación).
+const meta = new Map();
 
-async function lengthOf(species) {
-  if (!lengths.has(species)) {
-    try {
-      const tpl = await (await fetch(`templates/${species}.json`)).json();
-      lengths.set(species, tpl.bbox.w);
-    } catch {
-      lengths.set(species, 170);
-    }
+async function loadMeta() {
+  try {
+    const res = await fetch('templates/index.json', { cache: 'no-cache' });
+    for (const s of await res.json()) meta.set(s.id, s);
+  } catch (err) {
+    console.warn(err.message);
   }
-  return lengths.get(species);
 }
 
-/** Demo: 6 peces (2 permanentes) y 2 de 4 visitantes activos, rotando cada DEMO_ROTATE_MS. */
+const metaOf = (species) => ({ scale: 1, speed: 1, wave: 1, ...meta.get(species) });
+
+/** Demo: un pez fijo por especie y 2 de 4 pirañas visitantes, rotando cada DEMO_ROTATE_MS. */
 function demoRows() {
+  const fixed = ['tiburon', 'bonito', 'piloto', 'pirana']
+    .map((species, i) => ({ id: i + 1, species, filename: `${species}-1.png`, permanent: true }));
   const slot = Math.floor(Date.now() / DEMO_ROTATE_MS);
-  const visitors = [3, 4, 5, 6];
-  const active = new Set([visitors[slot % 4], visitors[(slot + 1) % 4]]);
-  return [1, 2, 3, 4, 5, 6]
-    .filter((id) => id <= 2 || active.has(id))
-    .map((id) => ({ id, species: 'pirana', filename: `pirana-${id}.png`, permanent: id <= 2 }));
+  const visitors = [2, 3, 4, 5].map((n) => ({ id: 10 + n, species: 'pirana', filename: `pirana-${n}.png`, permanent: false }));
+  return [...fixed, visitors[slot % 4], visitors[(slot + 1) % 4]];
 }
 
 const fish = new Map();
@@ -64,17 +63,17 @@ function loadImage(src) {
   });
 }
 
-async function spawn(row) {
-  const fromLeft = Math.random() < 0.5;
+/** `inside`: en la primera carga los peces aparecen ya dentro del acuario; los que llegan después entran nadando. */
+async function spawn(row, inside = false) {
+  const fromLeft = Math.random() < 0.5, m = metaOf(row.species);
   const f = {
-    row, img: null, mm: 170,
-    x: fromLeft ? -0.15 : 1.15, dir: fromLeft ? 1 : -1, face: fromLeft ? 1 : -1,
-    baseY: 0.18 + Math.random() * 0.66, speed: 0.025 + Math.random() * 0.03,
+    row, img: null, scale: m.scale, wave: m.wave,
+    x: inside ? 0.1 + Math.random() * 0.8 : fromLeft ? -0.25 : 1.25, dir: fromLeft ? 1 : -1, face: fromLeft ? 1 : -1,
+    baseY: 0.18 + Math.random() * 0.66, speed: (0.025 + Math.random() * 0.03) * m.speed,
     phase: Math.random() * Math.PI * 2, alpha: 0, leaving: false,
   };
   fish.set(row.id, f);
   try {
-    f.mm = await lengthOf(row.species);
     f.img = await loadImage(DEMO ? `aquarium/demo/${row.filename}` : publicUrl(row.filename));
   } catch (err) {
     console.warn(err.message);
@@ -88,7 +87,7 @@ async function sync() {
     const ids = new Set(rows.map((r) => r.id));
     for (const row of rows) {
       const f = fish.get(row.id);
-      if (!f) spawn(row);
+      if (!f) spawn(row, status.lastSync === 0);
       else if (f.leaving) f.leaving = false;
     }
     for (const [id, f] of fish) {
@@ -150,8 +149,8 @@ function drawSea(t, dt) {
   }
 }
 
-/** Tamaño en pantalla: una piraña (≈170 mm impresa) mide ~16 % del lado útil. */
-const pxPerMm = () => Math.min(W, H * 1.78) * 0.16 / 170;
+/** Largo en pantalla de una especie con scale 1 (la piraña): ~13 % del lado útil. */
+const baseLength = () => Math.min(W, H * 1.78) * 0.13;
 
 /** Avanza un pez; devuelve false cuando ya salió de la pantalla y hay que quitarlo. */
 function updateFish(f, dt) {
@@ -169,7 +168,7 @@ function updateFish(f, dt) {
 }
 
 function drawFish(f, t) {
-  const img = f.img, L = f.mm * pxPerMm(), Hh = L * img.height / img.width;
+  const img = f.img, L = f.scale * baseLength(), Hh = L * img.height / img.width;
   const x = f.x * W, y = (f.baseY + Math.sin(t * 0.35 + f.phase) * 0.03) * H;
   // La plantilla mira a la izquierda: nadar hacia la derecha es espejarla. `face` interpola el giro.
   const flip = Math.abs(f.face) < 0.08 ? 0.08 * Math.sign(f.face || 1) : f.face;
@@ -177,7 +176,7 @@ function drawFish(f, t) {
   ctx.globalAlpha = f.alpha;
   ctx.translate(x, y);
   ctx.scale(-flip, 1);
-  const sw = img.width / STRIPS, dw = L / STRIPS, amp = Hh * 0.06, wave = t * (4 + f.speed * 40) + f.phase;
+  const sw = img.width / STRIPS, dw = L / STRIPS, amp = L * 0.035 * f.wave, wave = t * (4 + f.speed * 40) + f.phase;
   for (let i = 0; i < STRIPS; i++) {
     const u = (i + 0.5) / STRIPS; // 0 = cabeza, 1 = cola
     const dy = amp * Math.sin(u * Math.PI * 2 - wave) * u ** 1.5;
@@ -225,6 +224,7 @@ if (DEBUG) {
   document.getElementById('debug').hidden = false;
   setInterval(() => drawDebug(Date.now()), 500);
 }
+await loadMeta();
 sync();
 setInterval(sync, POLL_MS);
 requestAnimationFrame(frame);

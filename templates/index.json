@@ -1,6 +1,34 @@
 [
  {
   "id": "pirana",
-  "name": "Piraña roja"
+  "name": "Piraña roja",
+  "short": "Piraña",
+  "scale": 1.0,
+  "speed": 1.0,
+  "wave": 1.0
+ },
+ {
+  "id": "tiburon",
+  "name": "Tiburón azul",
+  "short": "Tiburón",
+  "scale": 2.6,
+  "speed": 0.7,
+  "wave": 0.5
+ },
+ {
+  "id": "bonito",
+  "name": "Bonito del Atlántico",
+  "short": "Bonito",
+  "scale": 1.6,
+  "speed": 1.3,
+  "wave": 0.8
+ },
+ {
+  "id": "piloto",
+  "name": "Pez piloto",
+  "short": "Piloto",
+  "scale": 1.2,
+  "speed": 1.1,
+  "wave": 1.0
  }
 ]

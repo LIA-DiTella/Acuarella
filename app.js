@@ -1,9 +1,10 @@
-// Escáner de plantillas: cámara trasera, overlay del contorno, autoescaneo que se imanta al trazo impreso,
-// recorte proyectivo con máscara y subida a Supabase.
-// Las plantillas están en milímetros sobre la hoja A4 (ver tools/extract_template.py).
+// Escáner de plantillas: cámara trasera, overlay del contorno, autoescaneo que detecta la especie y se imanta al
+// trazo impreso, recorte proyectivo con máscara y subida a Supabase.
+// Las plantillas están en milímetros sobre la hoja A4 (ver tools/extract_template.py). Todas comparten el marco,
+// así que el encuadre en pantalla es el mismo para todas las especies.
 
 import { mul, inv, affineToH, hMul, hApply } from './geometry.js';
-import { AutoScanner, parsePath, SEARCH_FROM_OVERLAY, SEARCH_FROM_PREVIOUS } from './autoscan.js';
+import { SpeciesScanner, parsePath, SEARCH_FROM_OVERLAY, SEARCH_FROM_PREVIOUS } from './autoscan.js';
 import { saveScan, isConfigured } from './storage.js';
 
 const OUT_W = 1600;       // ancho del PNG de salida (px)
@@ -16,15 +17,19 @@ const TEST = params.has('test');
 const TEST_STILL = params.get('still') !== '0';
 const TEST_UPLOAD = params.has('upload');
 const TEST_CAST = params.has('cast');
+const TEST_SPECIES = params.get('species');
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), video = $('video'), testCanvas = $('testCanvas'), overlay = $('overlay');
 const state = {
-  templates: [], cache: new Map(), tpl: null, poly: null, scanner: null, pageImg: null, layout: null,
-  running: false, busy: false, entry: null, mask: null,
+  species: [], tpls: new Map(), polys: new Map(), masks: new Map(),
+  mode: 'auto',       // 'auto' o el id de la especie fijada a mano
+  shown: null,        // especie cuyo contorno se muestra (la seleccionada o la última detectada)
+  frameRegion: null, scanner: null, layout: null, pageImg: null, testTpl: null,
+  running: false, busy: false, entry: null,
 };
 
-// --- Plantillas
+// --- Plantillas y especies
 
 async function fetchJson(url) {
   const res = await fetch(url, { cache: 'no-cache' });
@@ -41,46 +46,81 @@ function loadImage(src) {
   });
 }
 
-async function selectTemplate(id) {
-  if (!state.cache.has(id)) state.cache.set(id, await fetchJson(`templates/${id}.json`));
-  state.tpl = state.cache.get(id);
-  state.poly = parsePath(state.tpl.fishPath);
-  state.scanner = new AutoScanner(state.tpl, region(state.tpl));
-  state.mask = null;
-  if (TEST) state.pageImg = await loadImage(`templates/${id}_page.png`);
-  for (const chip of $('chips').children) chip.setAttribute('aria-pressed', chip.dataset.id === id);
-  $('pdfLink').href = `templates/${id}.pdf`;
+async function loadTemplates() {
+  state.species = await fetchJson('templates/index.json');
+  const tpls = await Promise.all(state.species.map((s) => fetchJson(`templates/${s.id}.json`)));
+  for (const t of tpls) {
+    state.tpls.set(t.id, t);
+    state.polys.set(t.id, parsePath(t.fishPath));
+  }
+  state.frameRegion = unionRegion(tpls);
+  state.scanner = new SpeciesScanner(tpls, region);
+  state.shown = state.species[0].id;
+  if (TEST) {
+    state.testTpl = state.tpls.get(TEST_SPECIES) ?? state.tpls.get('pirana') ?? tpls[0];
+    state.pageImg = await loadImage(`templates/${state.testTpl.id}_page.png`);
+  }
+  renderChips();
   update();
 }
 
-async function loadTemplates() {
-  state.templates = await fetchJson('templates/index.json');
-  for (const t of state.templates) {
+function renderChips() {
+  const chips = [{ id: 'auto', label: 'Auto' }, ...state.species.map((s) => ({ id: s.id, label: s.short ?? s.name }))];
+  $('chips').replaceChildren(...chips.map(({ id, label }) => {
     const chip = document.createElement('button');
     chip.className = 'chip';
-    chip.dataset.id = t.id;
-    chip.textContent = t.name;
-    chip.onclick = () => selectTemplate(t.id);
-    $('chips').append(chip);
+    chip.dataset.id = id;
+    chip.textContent = label;
+    chip.onclick = () => setMode(id);
+    return chip;
+  }));
+  updateChips();
+}
+
+/** 'auto' detecta la especie; un id la fija. */
+function setMode(id) {
+  state.mode = id;
+  state.scanner.setOnly(id === 'auto' ? null : id);
+  if (id !== 'auto') showSpecies(id);
+  updateChips();
+}
+
+function showSpecies(id) {
+  if (state.shown === id) return;
+  state.shown = id;
+  if (state.layout) renderOverlay();
+  updateChips();
+}
+
+function updateChips() {
+  for (const chip of $('chips').children) {
+    chip.setAttribute('aria-pressed', chip.dataset.id === state.mode);
+    chip.dataset.detected = state.mode === 'auto' && chip.dataset.id === state.shown;
   }
-  await selectTemplate(state.templates[0].id);
 }
 
 // --- Geometría
 
-/** Zona de la plantilla que se encuadra y recorta: el pez con un margen, en mm. */
+/** Zona de una especie que se recorta: el pez con un margen, en mm. */
 function region(tpl) {
   const b = tpl.bbox, m = MARGIN_MM;
   return { x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m };
 }
 
-/** Ubica la región en pantalla, dejando libres los controles. En vertical se rota 90° (cabeza arriba). */
+/** Encuadre común: la unión de las regiones de todas las especies (las hojas comparten el marco). */
+function unionRegion(tpls) {
+  const rs = tpls.map(region);
+  const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y));
+  return { x, y, w: Math.max(...rs.map((r) => r.x + r.w)) - x, h: Math.max(...rs.map((r) => r.y + r.h)) - y };
+}
+
+/** Ubica el encuadre en pantalla, dejando libres los controles. En vertical se rota 90° (cabeza arriba). */
 function computeLayout() {
   const W = stage.clientWidth, H = stage.clientHeight;
   const portrait = H > W;
-  const inset = portrait ? { top: 60, right: 12, bottom: 160, left: 12 } : { top: 52, right: 116, bottom: 36, left: 12 };
+  const inset = portrait ? { top: 64, right: 12, bottom: 160, left: 12 } : { top: 56, right: 116, bottom: 36, left: 12 };
   const aw = W - inset.left - inset.right, ah = H - inset.top - inset.bottom;
-  const r = region(state.tpl);
+  const r = state.frameRegion;
   const rw = portrait ? r.h : r.w, rh = portrait ? r.w : r.h;
   const s = Math.min(aw / rw, ah / rh);
   const ox = inset.left + (aw - s * rw) / 2, oy = inset.top + (ah - s * rh) / 2;
@@ -106,7 +146,7 @@ function source() {
 // --- Overlay
 
 function renderOverlay() {
-  const { W, H, s, screenFromTpl } = state.layout, t = state.tpl;
+  const { W, H, s, screenFromTpl } = state.layout, t = state.tpls.get(state.shown);
   const M = `matrix(${screenFromTpl.join(' ')})`;
   const hair = 1 / s; // 1 px de pantalla en mm
   overlay.setAttribute('viewBox', `0 0 ${W} ${H}`);
@@ -118,7 +158,7 @@ function renderOverlay() {
     <rect width="${W}" height="${H}" fill="rgba(0,8,16,.4)" mask="url(#cut)"/>
     <g transform="${M}" fill="none">
       <rect width="${t.page.w}" height="${t.page.h}" stroke="rgba(255,255,255,.35)" stroke-width="${hair}" stroke-dasharray="${6 * hair} ${6 * hair}"/>
-      <rect x="${t.frame.x}" y="${t.frame.y}" width="${t.frame.w}" height="${t.frame.h}" rx="${t.frame.r}" stroke="rgba(255,255,255,.3)" stroke-width="${hair}"/>
+      <rect x="${t.frame.x}" y="${t.frame.y}" width="${t.frame.w}" height="${t.frame.h}" rx="${t.frame.r}" stroke="rgba(255,255,255,.5)" stroke-width="${1.5 * hair}"/>
       <path class="target" d="${t.fishPath}" stroke="#29f0ff" stroke-opacity=".75" stroke-width="${Math.max(t.stroke, 3 * hair)}" stroke-linejoin="round"/>
     </g>
     <path id="track" class="track" d="" stroke-width="${Math.max(t.stroke * s, 3)}"/>`;
@@ -129,29 +169,32 @@ function drawTrack(r, f, src) {
   overlay.dataset.state = r.state;
   const track = $('track');
   if (!track) return;
-  if (!r.H || r.quality < 0.5) {
+  if (!r.H || !r.tracked) {
     track.setAttribute('d', '');
     return;
   }
   const { W, H } = state.layout;
   const A = mul(inv(videoFromScreen(W, H, src.w, src.h)), [src.w / f.w, 0, 0, src.h / f.h, 0, 0]);
   let d = '';
-  for (const [x, y] of state.poly) {
+  for (const [x, y] of state.polys.get(r.species)) {
     const [ax, ay] = hApply(r.H, x, y);
     d += `${d ? 'L' : 'M'}${(A[0] * ax + A[2] * ay + A[4]).toFixed(1)} ${(A[1] * ax + A[3] * ay + A[5]).toFixed(1)}`;
   }
   track.setAttribute('d', `${d}Z`);
 }
 
-const STATUS = {
-  searching: 'Acercá la hoja al contorno celeste',
-  locked: 'Enganchado · mantené quieto',
-  cooldown: 'Capturado · poné otra hoja',
-};
-
 function setStatus(r) {
   const manual = !$('auto').checked && r.state === 'locked';
-  $('statusText').textContent = manual ? 'Enganchado · tocá el botón' : STATUS[r.state];
+  let text;
+  if (r.state === 'searching') {
+    text = state.mode === 'auto'
+      ? 'Acercá la hoja · la especie se detecta sola'
+      : `Acercá la hoja de ${state.tpls.get(state.mode).name}`;
+  } else {
+    const name = state.tpls.get(r.species ?? state.shown).name;
+    text = r.state === 'cooldown' ? `${name} · capturado, poné otra hoja` : `${name} · ${manual ? 'tocá el botón' : 'mantené quieto'}`;
+  }
+  $('statusText').textContent = text;
   $('status').dataset.state = r.state;
   const progress = r.state === 'cooldown' ? 1 : r.state === 'locked' && !manual ? r.progress : 0;
   $('progress').style.transform = `scaleX(${progress})`;
@@ -159,7 +202,7 @@ function setStatus(r) {
 
 /** Postura del modo ?test=1: la hoja simulada queda corrida y girada respecto del overlay. */
 function testPerturbation(now) {
-  const b = state.tpl.bbox, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const b = state.testTpl.bbox, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
   const wob = TEST_STILL ? 0 : Math.sin(now / 700);
   const ang = (3 + wob) * Math.PI / 180, s = 1.03;
   const tx = 7 + 2 * wob, ty = -5 + (TEST_STILL ? 0 : 1.5 * Math.cos(now / 900));
@@ -167,9 +210,9 @@ function testPerturbation(now) {
   return [c, sn, -sn, c, cx - c * cx + sn * cy + tx, cy - sn * cx - c * cy + ty];
 }
 
-/** Modo ?test=1: simula un sensor 16:9 que ve el render del PDF (corrido respecto del overlay). */
+/** Modo ?test=1: simula un sensor 16:9 que ve la hoja de `&species=` (corrida respecto del overlay). */
 function drawTestFrame() {
-  const { W, H, screenFromTpl } = state.layout, t = state.tpl, img = state.pageImg;
+  const { W, H, screenFromTpl } = state.layout, t = state.testTpl, img = state.pageImg;
   testCanvas.width = 1920;
   testCanvas.height = 1080;
   const ctx = testCanvas.getContext('2d');
@@ -189,7 +232,7 @@ function drawTestFrame() {
 }
 
 function update() {
-  if (!state.tpl || !stage.clientWidth) return;
+  if (!state.scanner || !stage.clientWidth) return;
   state.layout = computeLayout();
   renderOverlay();
   if (TEST && state.pageImg) drawTestFrame();
@@ -227,9 +270,10 @@ function tick() {
   if (!src.w) return;
   const f = grayFrame(src.el, src.w, src.h);
   const r = state.scanner.step(f.gray, f.w, f.h, analysisFromTpl(f, src), performance.now(), $('auto').checked);
+  if (r.tracked) showSpecies(r.species);
   drawTrack(r, f, src);
   setStatus(r);
-  if (r.fire) shoot(r.H);
+  if (r.fire) shoot(r.H, r.species);
 }
 
 // --- Captura
@@ -238,10 +282,10 @@ const fullCanvas = document.createElement('canvas');
 const fctx = fullCanvas.getContext('2d', { willReadFrequently: true });
 
 /**
- * Toma el frame a resolución completa, vuelve a refinar la homografía sobre ese mismo frame (la mano se mueve
- * entre ticks) y recorta el pez. Si no encuentra el trazo, usa la posición del overlay.
+ * Toma el frame a resolución completa, vuelve a refinar la homografía de la especie sobre ese mismo frame (la mano
+ * se mueve entre ticks) y recorta el pez. Si no encuentra el trazo, usa la posición del overlay.
  */
-function captureFrame(hint) {
+function captureFrame(hint, id) {
   const src = source();
   fullCanvas.width = src.w;
   fullCanvas.height = src.h;
@@ -250,31 +294,34 @@ function captureFrame(hint) {
 
   const f = grayFrame(fullCanvas, src.w, src.h);
   const overlayH = analysisFromTpl(f, src);
-  const refined = state.scanner.refine(f.gray, f.w, f.h, hint ?? overlayH, hint ? SEARCH_FROM_PREVIOUS : SEARCH_FROM_OVERLAY, overlayH);
+  const scanner = state.scanner.get(id);
+  const refined = scanner.refine(f.gray, f.w, f.h, hint ?? overlayH, hint ? SEARCH_FROM_PREVIOUS : SEARCH_FROM_OVERLAY, overlayH);
   const H = refined.H && refined.quality >= 0.5 ? refined.H : overlayH;
-  return warpCapture(frame, hMul([src.w / f.w, 0, 0, 0, src.h / f.h, 0, 0, 0, 1], H));
+  return warpCapture(frame, hMul([src.w / f.w, 0, 0, 0, src.h / f.h, 0, 0, 0, 1], H), state.tpls.get(id));
 }
 
-function maskFor(w, h, outFromTpl) {
-  if (state.mask?.w === w && state.mask?.h === h) return state.mask.data;
+function maskFor(tpl, w, h, outFromTpl) {
+  const cached = state.masks.get(tpl.id);
+  if (cached?.w === w && cached?.h === h) return cached.data;
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.setTransform(...outFromTpl);
-  ctx.fill(new Path2D(state.tpl.fishPath));
-  state.mask = { w, h, data: ctx.getImageData(0, 0, w, h).data };
-  return state.mask.data;
+  ctx.fill(new Path2D(tpl.fishPath));
+  const data = ctx.getImageData(0, 0, w, h).data;
+  state.masks.set(tpl.id, { w, h, data });
+  return data;
 }
 
 /**
  * Muestreo inverso: cada píxel de salida → mm → H → frame (bilinear), con alfa de la silueta.
  * Fuera del pez (el margen de la región) no se guarda nada, pero se muestrea para medir el color del papel.
  */
-function warpCapture(frame, Hv) {
-  const r = region(state.tpl), k = OUT_W / r.w;
+function warpCapture(frame, Hv, tpl) {
+  const r = region(tpl), k = OUT_W / r.w;
   const w = OUT_W, h = Math.round(r.h * k);
-  const mask = maskFor(w, h, [k, 0, 0, k, -k * r.x, -k * r.y]);
+  const mask = maskFor(tpl, w, h, [k, 0, 0, k, -k * r.x, -k * r.y]);
   const out = new ImageData(w, h), o = out.data, s = frame.data, fw = frame.width, fh = frame.height;
   const rgb = [0, 0, 0], paper = [];
 
@@ -356,17 +403,18 @@ function normalizePaper(d, mask, white) {
   }
 }
 
-async function shoot(hint) {
-  if (state.busy || !state.tpl || !source().w) return;
+async function shoot(hint, id) {
+  if (state.busy || !state.scanner || !id || !source().w) return;
   state.busy = true;
   try {
     $('flash').classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
-    const canvas = captureFrame(hint);
+    const canvas = captureFrame(hint, id);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     state.scanner.markCaptured();
     if (state.entry) URL.revokeObjectURL(state.entry.url);
-    state.entry = { blob, species: TEST ? 'test' : state.tpl.id, name: state.tpl.name, job: {}, url: URL.createObjectURL(blob) };
+    const tpl = state.tpls.get(id);
+    state.entry = { blob, id, species: TEST ? 'test' : id, name: tpl.name, job: {}, url: URL.createObjectURL(blob) };
     onCapture(state.entry);
   } finally {
     state.busy = false;
@@ -377,7 +425,7 @@ async function shoot(hint) {
 
 /** Punto de integración: cada captura se muestra en la tarjeta y se sube a Supabase. */
 function onCapture(entry) {
-  console.log('captura', entry.species, entry.blob.size, 'bytes');
+  console.log('captura', entry.id, entry.species, entry.blob.size, 'bytes');
   $('card').hidden = false;
   $('cardImg').src = entry.url;
   upload(entry);
@@ -390,7 +438,7 @@ async function upload(entry) {
     $('card').dataset.kind = kind;
     $('cardRetry').hidden = !retry;
   };
-  if (TEST && !TEST_UPLOAD) return setCard('Modo prueba · no se sube');
+  if (TEST && !TEST_UPLOAD) return setCard(`${entry.name} · modo prueba, no se sube`);
   if (!isConfigured()) return setCard('Supabase sin configurar · no se sube', 'error');
   setCard('Subiendo…');
   try {
@@ -454,11 +502,18 @@ $('startBtn').onclick = async () => {
   }
 };
 
-$('shutter').onclick = () => shoot(state.scanner?.quality >= 0.5 ? state.scanner.H : null);
+$('shutter').onclick = () => {
+  const sc = state.scanner;
+  if (!sc) return;
+  const tracked = sc.current && sc.H && sc.quality >= 0.5;
+  shoot(tracked ? sc.H : null, tracked ? sc.current.id : state.mode === 'auto' ? state.shown : state.mode);
+};
 $('cardImg').onclick = () => state.entry && showResult(state.entry);
 $('cardRetry').onclick = () => state.entry && upload(state.entry);
 $('closeResult').onclick = () => { $('result').hidden = true; };
 
+$('pdfLink').href = 'templates/plantillas.pdf';
+$('pdfLink').textContent = 'Plantillas para imprimir (PDF)';
 const updated = new Date(document.lastModified);
 $('version').textContent = `${TEST ? 'TEST · ' : ''}${updated.toLocaleDateString('es-AR')} ${updated.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
 if (TEST) $('startBtn').textContent = 'Iniciar (modo prueba)';

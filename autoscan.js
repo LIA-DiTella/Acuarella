@@ -80,59 +80,7 @@ export class AutoScanner {
     this.stroke = tpl.stroke;
     const { x, y, w, h } = region;
     this.corners = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
-    this.reset();
-  }
-
-  reset() {
-    this.H = null;
-    this.quality = 0;
-    this.state = 'searching';
-    this.stable = 0;
-    this.lowSince = 0;
-  }
-
-  /**
-   * Un paso del autoescaneo sobre un frame en gris. `overlayH` es la homografía plantilla → frame que
-   * corresponde al overlay en pantalla. Devuelve { state, H, quality, progress, fire }.
-   */
-  step(gray, w, h, overlayH, now, armed = true) {
-    const fromPrevious = this.H && this.quality >= TRACK_Q;
-    let r = fromPrevious
-      ? this.refine(gray, w, h, this.H, SEARCH_FROM_PREVIOUS, overlayH)
-      : this.refine(gray, w, h, overlayH, SEARCH_FROM_OVERLAY, overlayH);
-    if (fromPrevious && r.quality < TRACK_Q) r = this.refine(gray, w, h, overlayH, SEARCH_FROM_OVERLAY, overlayH);
-
-    const moved = this.H && r.H ? this.cornerShift(this.H, r.H) : Infinity;
-    this.H = r.H;
-    this.quality = r.quality;
-
-    let fire = false;
-    if (this.state === 'cooldown') {
-      if (r.quality < RELEASE_Q) {
-        this.lowSince ||= now;
-        if (now - this.lowSince > RELEASE_MS) this.state = 'searching';
-      } else {
-        this.lowSince = 0;
-      }
-    } else if (r.quality >= LOCK_Q) {
-      this.state = 'locked';
-      this.stable = moved < MOVE_PX ? this.stable + 1 : 0;
-      if (armed && this.stable >= LOCK_TICKS) {
-        fire = true;
-        this.markCaptured();
-      }
-    } else {
-      this.state = 'searching';
-      this.stable = 0;
-    }
-    return { state: this.state, H: this.H, quality: this.quality, progress: Math.min(1, this.stable / LOCK_TICKS), fire };
-  }
-
-  /** Después de una captura (automática o manual) no vuelve a disparar hasta que saquen la hoja. */
-  markCaptured() {
-    this.state = 'cooldown';
-    this.stable = 0;
-    this.lowSince = 0;
+    this.id = tpl.id;
   }
 
   /** Refina H0 con búsquedas de radio decreciente (mm). */
@@ -203,5 +151,104 @@ export class AutoScanner {
       const p = hApply(A, x, y), q = hApply(B, x, y);
       return Math.hypot(p[0] - q[0], p[1] - q[1]);
     }));
+  }
+}
+
+/**
+ * Autoescaneo con varias especies. Sigue a la especie enganchada; si no hay ninguna, prueba una candidata por tick
+ * (así cada tick cuesta lo mismo que con una sola especie). Todas comparten el encuadre, porque las hojas tienen
+ * el mismo marco. `setOnly(id)` fija una especie (selección manual).
+ */
+export class SpeciesScanner {
+  constructor(templates, regionOf) {
+    this.scanners = templates.map((t) => new AutoScanner(t, regionOf(t)));
+    this.only = null;     // especie fijada a mano, o null para detectar
+    this.current = null;  // AutoScanner de la última especie detectada
+    this.tick = 0;
+    this.next = 0;
+    this.H = null;
+    this.quality = 0;
+    this.state = 'searching';
+    this.stable = 0;
+    this.lowSince = 0;
+  }
+
+  get(id) {
+    return this.scanners.find((s) => s.id === id);
+  }
+
+  setOnly(id) {
+    this.only = id;
+    if (id && this.current?.id !== id) {
+      this.current = null;
+      this.H = null;
+      this.quality = 0;
+      this.stable = 0;
+      if (this.state === 'locked') this.state = 'searching';
+    }
+  }
+
+  /**
+   * Un paso sobre un frame en gris. `overlayH` es la homografía plantilla → frame que corresponde al overlay.
+   * Devuelve { species, tracked, state, H, quality, progress, fire }.
+   */
+  step(gray, w, h, overlayH, now, armed = true) {
+    let sc = this.current, r = { H: null, quality: 0 };
+    if (sc && this.H && this.quality >= TRACK_Q) r = sc.refine(gray, w, h, this.H, SEARCH_FROM_PREVIOUS, overlayH);
+    // Enganchada pero sin calidad de captura: en ticks alternos compara con otra especie y se queda con la mejor
+    // (algunas siluetas se parecen, como bonito y piloto, y la equivocada no debe trabar la detección).
+    if (!this.only && this.scanners.length > 1 && r.quality >= TRACK_Q && r.quality < LOCK_Q && this.tick++ % 2 === 1) {
+      const others = this.scanners.filter((s) => s !== sc);
+      const other = others[this.next++ % others.length];
+      const alt = other.refine(gray, w, h, overlayH, SEARCH_FROM_OVERLAY, overlayH);
+      if (alt.quality > r.quality) {
+        sc = other;
+        r = alt;
+      }
+    }
+    if (r.quality < TRACK_Q) {
+      // En ticks pares se reintenta la última especie detectada; en los impares, la siguiente de la ronda.
+      const list = this.only ? [this.get(this.only)] : this.scanners;
+      const retry = this.current && list.includes(this.current) && this.tick++ % 2 === 0;
+      sc = retry ? this.current : list[this.next++ % list.length];
+      r = sc.refine(gray, w, h, overlayH, SEARCH_FROM_OVERLAY, overlayH);
+    }
+
+    const tracked = r.quality >= TRACK_Q;
+    const moved = tracked && sc === this.current && this.H ? sc.cornerShift(this.H, r.H) : Infinity;
+    if (tracked) this.current = sc;
+    this.H = tracked ? r.H : null;
+    this.quality = r.quality;
+
+    let fire = false;
+    if (this.state === 'cooldown') {
+      if (r.quality < RELEASE_Q) {
+        this.lowSince ||= now;
+        if (now - this.lowSince > RELEASE_MS) this.state = 'searching';
+      } else {
+        this.lowSince = 0;
+      }
+    } else if (r.quality >= LOCK_Q) {
+      this.state = 'locked';
+      this.stable = moved < MOVE_PX ? this.stable + 1 : 0;
+      if (armed && this.stable >= LOCK_TICKS) {
+        fire = true;
+        this.markCaptured();
+      }
+    } else {
+      this.state = 'searching';
+      this.stable = 0;
+    }
+    return {
+      species: this.current?.id ?? null, tracked, state: this.state, H: this.H, quality: r.quality,
+      progress: Math.min(1, this.stable / LOCK_TICKS), fire,
+    };
+  }
+
+  /** Después de una captura (automática o manual) no vuelve a disparar hasta que saquen la hoja. */
+  markCaptured() {
+    this.state = 'cooldown';
+    this.stable = 0;
+    this.lowSince = 0;
   }
 }

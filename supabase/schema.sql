@@ -8,8 +8,11 @@ create table if not exists public.species (
   enabled boolean not null default true
 );
 insert into public.species (id, name) values
-  ('pirana', 'Piraña roja'),
-  ('test',   'Pruebas (no aparece en el acuario)')
+  ('pirana',  'Piraña roja'),
+  ('tiburon', 'Tiburón azul'),
+  ('bonito',  'Bonito del Atlántico'),
+  ('piloto',  'Pez piloto'),
+  ('test',    'Pruebas (no aparece en el acuario)')
 on conflict (id) do nothing;
 
 -- Peces -----------------------------------------------------------------------
