@@ -22,14 +22,11 @@ El escáner busca el borde grueso impreso cerca del contorno esperado. Corrige p
 
 El fondo es el arrecife 3D de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)), con su paneo lateral lento: una vuelta completa cada 120 segundos. Los peces escaneados nadan alrededor de la cámara como planos que ondulan, así que se ven en 3D aunque sean dibujos, y hay peces en los 360°: siempre hay hacia donde el paneo esté mirando.
 
-Navegan con el mapa de alturas del arrecife (`reef/overhead.png`), así que trepan los montículos, se cuelan por los canales y se esconden dentro de los corales en vez de atravesarlos.
+El movimiento de los escaneos es el sistema de criaturas de Martín, portado tal cual en `creatures.js`: cada pez recorre una órbita alrededor del espectador, con ondas de velocidad que le dan ese ritmo de planear y acelerar, cabeceo vertical, alabeo al doblar y aleteo cuya frecuencia sigue el avance real. Como orbitan alrededor de la cámara, siempre se los ve de costado.
 
-Cada especie se mueve distinto, según el campo `motion` de `templates/index.json`: los peces nadan aleteando, la raya ondula todo el disco, el pulpo avanza a pulsos y la estrella casi no se mueve, pegada al fondo.
+Cada especie ajusta ancho, altura, radio y ritmo en la tabla `SPECIES` de `creatures.js`: el tiburón es grande y lento, la raya lleva el cuerpo casi todo flexible para ondular el disco, el pulpo va lento y la estrella casi no se mueve.
 
-Se puede interactuar:
-
-- **Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar.
-- **Clic sobre un escaneo** espanta al cardumen: todos salen nadando rápido en dirección contraria.
+**Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar.
 
 Muestra los peces fijos (`permanent`) y los visitantes activos.
 
