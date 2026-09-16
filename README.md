@@ -20,7 +20,9 @@ El escáner busca el borde grueso impreso cerca del contorno esperado. Corrige p
 
 ## Acuario
 
-El fondo es el arrecife 3D de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)), con la cámara fija. Los peces escaneados nadan por el cañón como planos que ondulan, así que se ven en 3D aunque sean dibujos.
+El fondo es el arrecife 3D de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)), con su paneo lateral lento: una vuelta completa cada 120 segundos. Los peces escaneados nadan alrededor de la cámara como planos que ondulan, así que se ven en 3D aunque sean dibujos, y hay peces en los 360°: siempre hay hacia donde el paneo esté mirando.
+
+Navegan con el mapa de alturas del arrecife (`reef/overhead.png`), así que trepan los montículos, se cuelan por los canales y se esconden dentro de los corales en vez de atravesarlos.
 
 Muestra los peces fijos (`permanent`) y los visitantes activos.
 
@@ -40,6 +42,7 @@ Parámetros de URL:
 - `&debug=1`: muestra conteos, fps y la próxima rotación.
 - `&quality=low|medium|high`: calidad del render (por defecto según el ancho de pantalla).
 - `&speed=N`: acelera la simulación de los peces, para ver entradas, escondites y loops sin esperar.
+- `&pan=0`: deja la cámara quieta en el encuadre inicial.
 
 ## Agregar una especie
 

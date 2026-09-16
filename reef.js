@@ -13,6 +13,33 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 const ASSETS = 'reef/';
 const PERIOD = 25;                 // segundos del ciclo de cáusticas y plantas
 const TAU = Math.PI * 2;
+const PAN_SECONDS = 120;           // una vuelta completa, igual que el paneo del proyecto de Martín
+const PITCH = -.025;               // su inclinación por defecto
+
+/**
+ * El mismo mapa de alturas cenital que usa el shader, pero leído en CPU: dice a qué altura llega el coral en
+ * cada punto del arrecife. Con eso los peces pueden trepar los montículos y colarse por los canales.
+ * Igual que en el shader: altura = rojo · 40 − 8, con uv = (x, −z) / 96 + 0,5.
+ */
+async function loadHeightfield(url) {
+  const img = await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`No se pudo cargar ${url}`));
+    image.src = url;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return (x, z) => {
+    const px = Math.min(width - 1, Math.max(0, Math.round((x / 96 + .5) * width)));
+    const py = Math.min(height - 1, Math.max(0, Math.round((-z / 96 + .5) * height)));
+    return data[(py * width + px) * 4] / 255 * 40 - 8;
+  };
+}
 const QUALITY = {
   low: { dpr: 1, shadows: false, bloom: false, motes: 85, distance: 72 },
   medium: { dpr: 1.25, shadows: true, bloom: true, motes: 170, distance: 100 },
@@ -20,7 +47,7 @@ const QUALITY = {
 };
 
 /** Crea el arrecife sobre un canvas. Devuelve la escena, la cámara fija y un render(dt). */
-export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 'medium', onProgress } = {}) {
+export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 'medium', onProgress, pan = true } = {}) {
   const textureLoader = new THREE.TextureLoader();
   const atlas = textureLoader.load(`${ASSETS}caustics.png`);
   const overhead = textureLoader.load(`${ASSETS}overhead.png`);
@@ -36,11 +63,14 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 
   scene.background = new THREE.Color('#087cb4');
   scene.fog = new THREE.FogExp2('#086aab', .028);
 
-  // Cámara fija, con el encuadre por defecto del proyecto de Martín (rumbo 0, a 2,35 m del fondo).
+  // Cámara en el mismo punto que en el proyecto de Martín (2,35 m sobre el fondo), con su paneo lateral lento.
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .12, 170);
   camera.position.set(0, 2.35, 0);
   camera.rotation.order = 'YXZ';
-  camera.rotation.set(-.025, 0, 0, 'YXZ');
+  camera.rotation.set(PITCH, 0, 0, 'YXZ');
+  let yaw = 0;
+
+  const terrainHeight = await loadHeightfield(`${ASSETS}overhead.png`);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -276,10 +306,16 @@ float waterCaustic(vec2 p) {
     scene, camera, renderer, shared, setQuality, applyWater,
     root: gltf.scene,  // geometría del arrecife: el acuario la usa para saber si un coral tapa a un pez
     get quality() { return quality; },
-    /** Avanza el ciclo del agua y dibuja. Los peces se agregan a `scene` desde el acuario. */
+    terrainHeight,  // altura del coral en (x, z): la usan los peces para no meterse dentro de la roca
+    get yaw() { return yaw; },
+    /** Avanza el ciclo del agua, mueve el paneo y dibuja. Los peces se agregan a `scene` desde el acuario. */
     render(dt) {
       time = (time + dt) % PERIOD;
       shared.uReefPhase.value = time / PERIOD * TAU;
+      if (pan) {
+        yaw -= dt * TAU / PAN_SECONDS;
+        camera.rotation.set(PITCH, yaw, 0, 'YXZ');
+      }
       if (QUALITY[quality].bloom) composer.render();
       else renderer.render(scene, camera);
     },
