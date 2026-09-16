@@ -4,7 +4,7 @@ Escáner web de plantillas de peces y acuario para el DiTella Day.
 
 - **Escáner:** https://lucian5102.github.io/ditella-scanner/
 - **Acuario:** https://lucian5102.github.io/ditella-scanner/aquarium.html
-- **Plantillas para imprimir:** [templates/plantillas.pdf](templates/plantillas.pdf). Incluye piraña, tiburón azul, bonito y pez piloto.
+- **Plantillas para imprimir:** [templates/plantillas.pdf](templates/plantillas.pdf) (piraña, tiburón azul, bonito y pez piloto), más [pulpo](templates/pulpo.pdf), [raya](templates/raya.pdf) y [estrella](templates/estrella.pdf).
 
 ## Escanear
 
@@ -23,6 +23,13 @@ El escáner busca el borde grueso impreso cerca del contorno esperado. Corrige p
 El fondo es el arrecife 3D de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)), con su paneo lateral lento: una vuelta completa cada 120 segundos. Los peces escaneados nadan alrededor de la cámara como planos que ondulan, así que se ven en 3D aunque sean dibujos, y hay peces en los 360°: siempre hay hacia donde el paneo esté mirando.
 
 Navegan con el mapa de alturas del arrecife (`reef/overhead.png`), así que trepan los montículos, se cuelan por los canales y se esconden dentro de los corales en vez de atravesarlos.
+
+Cada especie se mueve distinto, según el campo `motion` de `templates/index.json`: los peces nadan aleteando, la raya ondula todo el disco, el pulpo avanza a pulsos y la estrella casi no se mueve, pegada al fondo.
+
+Se puede interactuar:
+
+- **Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar.
+- **Clic sobre un escaneo** espanta al cardumen: todos salen nadando rápido en dirección contraria.
 
 Muestra los peces fijos (`permanent`) y los visitantes activos.
 

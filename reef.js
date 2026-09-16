@@ -14,7 +14,8 @@ const ASSETS = 'reef/';
 const PERIOD = 25;                 // segundos del ciclo de cáusticas y plantas
 const TAU = Math.PI * 2;
 const PAN_SECONDS = 120;           // una vuelta completa, igual que el paneo del proyecto de Martín
-const PITCH = -.025;               // su inclinación por defecto
+const PITCH = -.12;                // un poco más alta y mirando hacia abajo: el encuadre queda más alejado
+const CAMERA_Y = 3.2;
 
 /**
  * El mismo mapa de alturas cenital que usa el shader, pero leído en CPU: dice a qué altura llega el coral en
@@ -41,9 +42,9 @@ async function loadHeightfield(url) {
   };
 }
 const QUALITY = {
-  low: { dpr: 1, shadows: false, bloom: false, motes: 85, distance: 72 },
-  medium: { dpr: 1.25, shadows: true, bloom: true, motes: 170, distance: 100 },
-  high: { dpr: 2, shadows: true, bloom: true, motes: 240, distance: 165 },
+  low: { dpr: 1, shadows: false, bloom: false, motes: 85, bubbles: 120, distance: 72 },
+  medium: { dpr: 1.25, shadows: true, bloom: true, motes: 170, bubbles: 200, distance: 100 },
+  high: { dpr: 2, shadows: true, bloom: true, motes: 240, bubbles: 240, distance: 165 },
 };
 
 /** Crea el arrecife sobre un canvas. Devuelve la escena, la cámara fija y un render(dt). */
@@ -57,7 +58,15 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 
     t.minFilter = THREE.LinearFilter;
     t.magFilter = THREE.LinearFilter;
   }
-  const shared = { uReefPhase: { value: 0 }, uCaustic: { value: .92 }, uCausticAtlas: { value: atlas }, uOverhead: { value: overhead } };
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const shared = {
+    uReefPhase: { value: 0 },
+    uMotionScale: { value: reduced.matches ? .32 : 1 },
+    uCaustic: { value: .92 },
+    uCausticAtlas: { value: atlas },
+    uOverhead: { value: overhead },
+  };
+  reduced.addEventListener('change', (e) => { shared.uMotionScale.value = e.matches ? .32 : 1; });
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#087cb4');
@@ -65,10 +74,28 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 
 
   // Cámara en el mismo punto que en el proyecto de Martín (2,35 m sobre el fondo), con su paneo lateral lento.
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .12, 170);
-  camera.position.set(0, 2.35, 0);
+  camera.position.set(0, CAMERA_Y, 0);
   camera.rotation.order = 'YXZ';
   camera.rotation.set(PITCH, 0, 0, 'YXZ');
-  let yaw = 0;
+  let yaw = 0, pitch = PITCH, dragging = null, lastInteraction = -1e5;
+
+  // Arrastrar con el mouse (o el dedo) gira la vista; el paneo automático se retoma al rato de soltar.
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+    lastInteraction = performance.now();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (dragging?.id !== e.pointerId) return;
+    yaw += (e.clientX - dragging.x) * .0035;
+    pitch = Math.min(1.05, Math.max(-.9, pitch - (e.clientY - dragging.y) * .0035));
+    dragging.x = e.clientX;
+    dragging.y = e.clientY;
+    lastInteraction = performance.now();
+  });
+  const release = () => { dragging = null; lastInteraction = performance.now(); };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
 
   const terrainHeight = await loadHeightfield(`${ASSETS}overhead.png`);
 
@@ -107,12 +134,21 @@ uniform sampler2D uCausticAtlas; uniform sampler2D uOverhead;
 varying vec3 vReefWorld; varying vec3 vReefNormal;
 float atlasFrame(vec2 p,float f){
   f=mod(f,32.);vec2 tile=vec2(mod(f,8.),floor(f/8.));
-  return texture2D(uCausticAtlas,(fract(p)*256.+2.+tile*260.)/vec2(2080.,1040.)).r;
+  vec2 mirrored=1.-abs(fract(p*.5)*2.-1.);
+  return texture2D(uCausticAtlas,(mirrored*256.+2.+tile*260.)/vec2(2080.,1040.)).r;
 }
 float flowing(vec2 p,float frame){return mix(atlasFrame(p,floor(frame)),atlasFrame(p,floor(frame)+1.),fract(frame));}
 float waterCaustic(vec2 p) {
   float t=uReefPhase/6.28318530718*32.;
-  return .7*flowing(p*.19,t)+.3*flowing(p*.273,11.-t);
+  vec2 q=p*.135;
+  q+=vec2(sin(q.y*1.73+t*.031),sin(q.x*1.41-t*.027))*.34;
+  mat2 r1=mat2(.819,.574,-.574,.819);
+  mat2 r2=mat2(.454,-.891,.891,.454);
+  mat2 r3=mat2(.966,-.259,.259,.966);
+  float a=flowing(r1*q,t);
+  float b=flowing(r2*(q*1.37+vec2(3.17,-1.83)),11.-t*.83);
+  float d=flowing(r3*(q*.73+vec2(-2.41,4.63)),t*.61+17.);
+  return a*.46+b*.34+d*.2;
 }`;
 
   /**
@@ -120,12 +156,13 @@ float waterCaustic(vec2 p) {
    * La usan los materiales del arrecife y también los peces del acuario, para que queden integrados en la escena.
    * `vertexChunk` permite agregar deformaciones propias (el vaivén de las plantas, la ondulación de los peces).
    */
-  function applyWater(material, { caustic = .7, uniforms = {}, vertexDeclarations = '', vertexChunk = '', cacheKey = 'water-v1' } = {}) {
+  function applyWater(material, { caustic = .7, uniforms = {}, vertexDeclarations = '', vertexChunk = '', mapChunk = '', cacheKey = 'water-v1' } = {}) {
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, shared, uniforms);
       shader.uniforms.uMaterialCaustic = { value: caustic };
-      shader.vertexShader = `uniform float uReefPhase; varying vec3 vReefWorld; varying vec3 vReefNormal;\n${vertexDeclarations}\n` + shader.vertexShader;
+      shader.vertexShader = `uniform float uReefPhase; uniform float uMotionScale; varying vec3 vReefWorld; varying vec3 vReefNormal;\n${vertexDeclarations}\n` + shader.vertexShader;
       if (vertexChunk) shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${vertexChunk}`);
+      if (mapChunk) shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>\n${mapChunk}`);
       shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
         vec4 reefPosition=vec4(transformed,1.0); vec3 reefNormal=objectNormal;
         #ifdef USE_INSTANCING
@@ -141,7 +178,7 @@ float waterCaustic(vec2 p) {
         vec2 worldXY=vec2(vReefWorld.x,-vReefWorld.z);
         float top=texture2D(uOverhead,worldXY/96.+.5).r*40.-8.;
         float ledgeShadow=clamp(1.-max(top-vReefWorld.y-.1,0.)*1.7,0.,1.);
-        float c=smoothstep(.16,.82,waterCaustic(worldXY));
+        float c=smoothstep(.15,.78,waterCaustic(worldXY));
         vec3 causticBase=diffuseColor.rgb*.3+reflectedLight.directDiffuse*.7;
         outgoingLight+=causticBase*vec3(.7,.93,1.0)*c*uCaustic*uMaterialCaustic*incidence*depthFade*ledgeShadow;
         outgoingLight*=exp(-vec3(.012,.003,.0007)*reefDistance);
@@ -160,24 +197,33 @@ float waterCaustic(vec2 p) {
   }
 
   function waterMaterial(mat) {
-    if (mat.normalScale) mat.normalScale.setScalar(/rock/.test(mat.name) ? .32 : .24);
+    if (mat.normalScale) mat.normalScale.setScalar(/rock/.test(mat.name) ? .32 : /sand/.test(mat.name) ? .1 : .24);
     if ('transmission' in mat) mat.transmission = 0;
     const flexible = /grass|fan|soft/.test(mat.name);
     const family = (mat.name.match(/PBR • ([^•]+) •/) || [])[1]?.trim() || '';
-    const plantAmplitude = family === 'grass' ? .036 : family === 'fan' ? .026 : family === 'soft' ? .013 : 0;
+    const plantAmplitude = family === 'grass' ? .15 : family === 'fan' ? .105 : family === 'soft' ? .065 : 0;
     applyWater(mat, {
-      caustic: family === 'sand' ? 1.65 : family === 'rock' ? .3 : ((family === 'grass' || family === 'fan') ? .48 : .7),
-      cacheKey: flexible ? `reef-flex-${family}-v3` : `reef-solid-${family}-v3`,
+      caustic: family === 'sand' ? 1.42 : family === 'rock' ? .3 : ((family === 'grass' || family === 'fan') ? .48 : .7),
+      cacheKey: flexible ? `reef-flex-${family}-v5` : `reef-solid-${family}-v5`,
+      vertexDeclarations: flexible ? 'attribute float aPlantWeight;' : '',
+      // La arena queda menos saturada, como en el proyecto de Martín.
+      mapChunk: family === 'sand' ? 'diffuseColor.rgb=vec3(.28)+((diffuseColor.rgb-vec3(.28))*.72);' : '',
+      // El vaivén de las plantas pesa por la altura del vértice (aPlantWeight), así la base queda anclada.
       vertexChunk: flexible ? `
         vec3 reefOrigin=vec3(modelMatrix[3]);
         #ifdef USE_INSTANCING
           reefOrigin=(modelMatrix*instanceMatrix*vec4(0.,0.,0.,1.)).xyz;
         #endif
         float plantPhase=dot(reefOrigin.xz,vec2(.173,.317));
-        float rootedHeight=max(position.z,0.0);
-        float plantGain=.7+.3*sin(plantPhase*2.17);
-        transformed.x+=sin(uReefPhase+plantPhase+position.z*1.35)*${plantAmplitude.toFixed(4)}*rootedHeight*plantGain;
-        transformed.y+=cos(uReefPhase+plantPhase*.83+position.z*.9)*${(plantAmplitude * .38).toFixed(4)}*rootedHeight*plantGain;` : '',
+        float tipWeight=smoothstep(0.0,1.0,aPlantWeight);
+        float bendWeight=tipWeight*tipWeight;
+        float plantGain=.72+.28*sin(plantPhase*2.17);
+        float currentPulse=.82+.18*sin(uReefPhase*.5+plantPhase*.31);
+        float primary=sin(uReefPhase*2.0+plantPhase+aPlantWeight*1.7);
+        float secondary=sin(uReefPhase*3.0+plantPhase*.63-aPlantWeight*2.4);
+        float sway=(primary*.7+secondary*.3)*currentPulse*plantGain*bendWeight*uMotionScale;
+        transformed.x+=sway*${plantAmplitude.toFixed(4)};
+        transformed.z+=cos(uReefPhase*1.6+plantPhase+aPlantWeight*1.35)*${(plantAmplitude * .58).toFixed(4)}*bendWeight*uMotionScale;` : '',
     });
   }
 
@@ -221,11 +267,10 @@ float waterCaustic(vec2 p) {
 
   let seed = 721;
   const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  function particles(count, bubbles) {
-    const positions = [], attrs = [], streams = [[-9, -12], [14, 8], [-17, 9]];
+  function motesSystem(count) {
+    const positions = [], attrs = [];
     for (let i = 0; i < count; i++) {
-      const base = streams[i % 3];
-      positions.push(bubbles ? base[0] + (random() - .5) * .5 : (random() - .5) * 44, random() * 16, bubbles ? base[1] + (random() - .5) * .5 : (random() - .5) * 44);
+      positions.push((random() - .5) * 44, random() * 16, (random() - .5) * 44);
       attrs.push(random(), random());
     }
     const geo = new THREE.BufferGeometry();
@@ -233,14 +278,41 @@ float waterCaustic(vec2 p) {
     geo.setAttribute('aSeed', new THREE.Float32BufferAttribute(attrs, 2));
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { ...shared, uPixelRatio: { value: 1 } },
-      vertexShader: `uniform float uReefPhase;uniform float uPixelRatio;attribute vec2 aSeed;varying float vFade;varying float vDistance;void main(){vec3 p=position;float t=uReefPhase/6.2831853;${bubbles ? 'float life=fract(t+aSeed.x);p.y=.5+life*15.;p.x+=sin(uReefPhase+aSeed.y*6.28)*.16;vFade=pow(sin(life*3.14159),.5);' : 'p+=vec3(sin(uReefPhase+aSeed.x*6.28)*.2,sin(uReefPhase+aSeed.y*6.28)*.1,0.);vFade=.7;'}vec4 mv=modelViewMatrix*vec4(p,1.);vDistance=-mv.z;gl_PointSize=clamp(${bubbles ? '95.' : '28.'}*uPixelRatio/-mv.z,1.,${bubbles ? '18.' : '5.'});gl_Position=projectionMatrix*mv;}`,
-      fragmentShader: `varying float vFade;varying float vDistance;void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;float a=${bubbles ? 'exp(-pow((r-.78)*12.,2.))*.3' : 'pow(1.-r,2.)*.24'};gl_FragColor=vec4(.4,.8,.95,a*vFade*exp(-vDistance*.032));}`,
+      vertexShader: 'uniform float uReefPhase;uniform float uMotionScale;uniform float uPixelRatio;attribute vec2 aSeed;varying float vFade;varying float vDistance;void main(){vec3 p=position;p+=vec3(sin(uReefPhase+aSeed.x*6.28)*.2,sin(uReefPhase+aSeed.y*6.28)*.1,0.)*uMotionScale;vFade=.7;vec4 mv=modelViewMatrix*vec4(p,1.);vDistance=-mv.z;gl_PointSize=clamp(28.*uPixelRatio/-mv.z,1.,5.);gl_Position=projectionMatrix*mv;}',
+      fragmentShader: 'varying float vFade;varying float vDistance;void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;float a=pow(1.-r,2.)*.24;gl_FragColor=vec4(.4,.8,.95,a*vFade*exp(-vDistance*.032));}',
     });
     const points = new THREE.Points(geo, mat);
     scene.add(points);
     return points;
   }
-  const motes = particles(240, false), bubbles = particles(38, true);
+
+  // Burbujas: 12 chimeneas repartidas alrededor, con tamaños variados y brillo en el borde.
+  function bubbleSystem(count) {
+    const positions = [], attrs = [], emitters = [];
+    for (let i = 0; i < 12; i++) {
+      const angle = i * TAU / 12 + (i % 3 - .5) * .12, radius = 10 + (i % 4) * 3.1;
+      emitters.push([Math.cos(angle) * radius, .35 + (i % 3) * .55, Math.sin(angle) * radius]);
+    }
+    for (let i = 0; i < count; i++) {
+      const source = emitters[i % emitters.length], cluster = i % 9 < 3 ? .28 : .75;
+      positions.push(source[0] + (random() - .5) * cluster, source[1], source[2] + (random() - .5) * cluster);
+      const roll = random();
+      const size = roll < .62 ? .35 + random() * .37 : roll < .94 ? .75 + random() * .5 : 1.35 + random() * .45;
+      attrs.push(random(), random() < .7 ? 1 : 2, random(), size);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('aBubble', new THREE.Float32BufferAttribute(attrs, 4));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { ...shared, uPixelRatio: { value: 1 } },
+      vertexShader: 'uniform float uReefPhase;uniform float uMotionScale;uniform float uPixelRatio;attribute vec4 aBubble;varying float vFade;varying float vDistance;void main(){float t=uReefPhase/6.2831853;float life=fract(t*aBubble.y+aBubble.x);vec3 p=position;p.y+=life*(12.+aBubble.z*6.);float wobble=(sin(life*18.+aBubble.x*31.)*.24+sin(life*7.+aBubble.z*17.)*.13)*uMotionScale;p.x+=wobble;p.z+=cos(life*13.+aBubble.x*19.)*.18*uMotionScale;vFade=pow(sin(life*3.14159),.62);vec4 mv=modelViewMatrix*vec4(p,1.);vDistance=-mv.z;gl_PointSize=clamp(105.*aBubble.w*uPixelRatio/-mv.z,1.5,24.);gl_Position=projectionMatrix*mv;}',
+      fragmentShader: 'varying float vFade;varying float vDistance;void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;float rim=exp(-pow((r-.78)*11.,2.));float glint=exp(-length(gl_PointCoord-vec2(.34,.31))*18.);float alpha=(rim*.34+glint*.22)*vFade*exp(-vDistance*.026);gl_FragColor=vec4(.48,.86,1.,alpha);}',
+    });
+    const points = new THREE.Points(geo, mat);
+    scene.add(points);
+    return points;
+  }
+  const motes = motesSystem(240), bubbles = bubbleSystem(240);
 
   const renderables = [];
   const gltf = await new Promise((resolve, reject) => {
@@ -253,7 +325,17 @@ float waterCaustic(vec2 p) {
     o.castShadow = true;
     o.receiveShadow = true;
     renderables.push(o);
-    for (const m of [].concat(o.material)) if (!mats.has(m)) { mats.add(m); waterMaterial(m); }
+    const materials = [].concat(o.material);
+    // Peso por altura para el vaivén de pastos y abanicos: 0 en la base, 1 en la punta.
+    if (materials.some((m) => /PBR • (grass|fan|soft) •/.test(m.name)) && !o.geometry.getAttribute('aPlantWeight')) {
+      const position = o.geometry.getAttribute('position');
+      o.geometry.computeBoundingBox();
+      const min = o.geometry.boundingBox.min.y, span = Math.max(o.geometry.boundingBox.max.y - min, 1e-5);
+      const weights = new Float32Array(position.count);
+      for (let i = 0; i < position.count; i++) weights[i] = Math.min(1, Math.max(0, (position.getY(i) - min) / span));
+      o.geometry.setAttribute('aPlantWeight', new THREE.BufferAttribute(weights, 1));
+    }
+    for (const m of materials) if (!mats.has(m)) { mats.add(m); waterMaterial(m); }
   });
   scene.updateMatrixWorld(true);
   const box = new THREE.Box3();
@@ -288,6 +370,7 @@ float waterCaustic(vec2 p) {
     bloom.enabled = q.bloom;
     shafts.visible = quality !== 'low';
     motes.geometry.setDrawRange(0, q.motes);
+    bubbles.geometry.setDrawRange(0, q.bubbles);
     camera.far = q.distance;
     camera.updateProjectionMatrix();
     for (const o of renderables) {
@@ -312,10 +395,8 @@ float waterCaustic(vec2 p) {
     render(dt) {
       time = (time + dt) % PERIOD;
       shared.uReefPhase.value = time / PERIOD * TAU;
-      if (pan) {
-        yaw -= dt * TAU / PAN_SECONDS;
-        camera.rotation.set(PITCH, yaw, 0, 'YXZ');
-      }
+      if (pan && !dragging && performance.now() - lastInteraction > 4000) yaw -= dt * TAU / PAN_SECONDS;
+      camera.rotation.set(pitch, yaw, 0, 'YXZ');
       if (QUALITY[quality].bloom) composer.render();
       else renderer.render(scene, camera);
     },

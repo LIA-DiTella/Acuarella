@@ -5,7 +5,8 @@
   "short": "Piraña",
   "scale": 1.0,
   "speed": 1.0,
-  "wave": 1.0
+  "wave": 1.0,
+  "motion": "swim"
  },
  {
   "id": "tiburon",
@@ -13,7 +14,8 @@
   "short": "Tiburón",
   "scale": 2.6,
   "speed": 0.7,
-  "wave": 0.5
+  "wave": 0.5,
+  "motion": "swim"
  },
  {
   "id": "bonito",
@@ -21,7 +23,8 @@
   "short": "Bonito",
   "scale": 1.6,
   "speed": 1.3,
-  "wave": 0.8
+  "wave": 0.8,
+  "motion": "swim"
  },
  {
   "id": "piloto",
@@ -29,6 +32,34 @@
   "short": "Piloto",
   "scale": 1.2,
   "speed": 1.1,
-  "wave": 1.0
+  "wave": 1.0,
+  "motion": "swim"
+ },
+ {
+  "id": "pulpo",
+  "name": "Pulpo colorado patagónico",
+  "short": "Pulpo",
+  "scale": 1.9,
+  "speed": 0.5,
+  "wave": 0.35,
+  "motion": "pulse"
+ },
+ {
+  "id": "raya",
+  "name": "Raya de río",
+  "short": "Raya",
+  "scale": 1.7,
+  "speed": 0.75,
+  "wave": 1.9,
+  "motion": "undulate"
+ },
+ {
+  "id": "estrella",
+  "name": "Estrella de mar",
+  "short": "Estrella",
+  "scale": 0.85,
+  "speed": 0.18,
+  "wave": 0.1,
+  "motion": "cling"
  }
 ]
