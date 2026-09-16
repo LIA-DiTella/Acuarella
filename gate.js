@@ -19,14 +19,18 @@ const guardar = (valor) => {
   } catch { /* si no se puede guardar, se vuelve a preguntar la próxima vez */ }
 };
 
-/** Pide la clave una vez por dispositivo. Devuelve false y deja la página bloqueada si no coincide. */
-export function pedirClave(titulo) {
+/**
+ * Pide la clave una vez por dispositivo. Devuelve false si no coincide.
+ * Con `bloquear` (por defecto) reemplaza la página; sin él la página queda como está y decide quien llama.
+ */
+export function pedirClave(titulo, { bloquear = true } = {}) {
   if (leer() === CLAVE) return true;
   const intento = prompt(`${titulo}\n\nClave:`);
   if (intento === CLAVE) {
     guardar(CLAVE);
     return true;
   }
+  if (!bloquear) return false;
   document.body.innerHTML = `
     <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
                 background:#052a3d;color:#e8f7fb;font:16px/1.5 system-ui,sans-serif;text-align:center;padding:24px">

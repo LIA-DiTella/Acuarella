@@ -8,9 +8,6 @@ import { SpeciesScanner, parsePath, SEARCH_FROM_OVERLAY, SEARCH_FROM_PREVIOUS } 
 import { saveScan, isConfigured } from './storage.js';
 import { pedirClave } from './gate.js';
 
-// La página de capturar queda detrás de la misma clave que el panel.
-if (!pedirClave('Escáner de peces')) throw new Error('sin clave');
-
 const OUT_W = 1600;       // ancho del PNG de salida (px)
 const MARGIN_MM = 3;      // margen alrededor del pez al encuadrar y recortar
 const ANALYSIS_PX = 960;  // lado mayor del frame que analiza el autoescaneo
@@ -490,6 +487,11 @@ function cameraError(err) {
 
 $('startBtn').onclick = async () => {
   $('error').textContent = '';
+  // La clave se pide recién acá: cualquiera puede abrir el link y mirar la página o ir al acuario.
+  if (!pedirClave('Escáner de peces', { bloquear: false })) {
+    $('error').textContent = 'Clave incorrecta. Pedísela al equipo y tocá Iniciar cámara otra vez.';
+    return;
+  }
   try {
     if (TEST) {
       video.hidden = true;

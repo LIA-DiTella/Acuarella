@@ -53,7 +53,9 @@ Parámetros de URL:
 
 `admin.html` lista todos los escaneos subidos, con miniatura, especie y fecha, y permite borrarlos de a uno o borrar de una todos los visitantes (los peces fijos del equipo no se tocan). Al borrar, el pez desaparece del acuario en la próxima sincronización, hasta 20 segundos después.
 
-El escáner y el panel piden una clave, **la clave del equipo**, que se guarda en el dispositivo y no se vuelve a pedir.
+La clave es **la clave del equipo**, se guarda en el dispositivo y no se vuelve a pedir. El panel la pide al abrirlo; el escáner
+recién al tocar **Iniciar cámara**, así que se puede pasar el link a cualquiera: ve la página y puede entrar al
+acuario sin clave.
 
 Dos aclaraciones sobre eso:
 
