@@ -4,6 +4,7 @@ Escáner web de plantillas de peces y acuario para el DiTella Day.
 
 - **Escáner:** https://lucian5102.github.io/ditella-scanner/
 - **Acuario:** https://lucian5102.github.io/ditella-scanner/aquarium.html
+- **Panel:** https://lucian5102.github.io/ditella-scanner/admin.html
 - **Plantillas para imprimir:** [templates/plantillas.pdf](templates/plantillas.pdf) (piraña, tiburón azul, bonito y pez piloto), más [pulpo](templates/pulpo.pdf), [raya](templates/raya.pdf) y [estrella](templates/estrella.pdf).
 
 ## Escanear
@@ -47,6 +48,19 @@ Parámetros de URL:
 - `&quality=low|medium|high`: calidad del render (por defecto según el ancho de pantalla).
 - `&speed=N`: acelera la simulación de los peces, para ver entradas, escondites y loops sin esperar.
 - `&pan=0`: deja la cámara quieta en el encuadre inicial.
+
+## Panel
+
+`admin.html` lista todos los escaneos subidos, con miniatura, especie y fecha, y permite borrarlos de a uno o borrar de una todos los visitantes (los peces fijos del equipo no se tocan). Al borrar, el pez desaparece del acuario en la próxima sincronización, hasta 20 segundos después.
+
+El escáner y el panel piden una clave, **la clave del equipo**, que se guarda en el dispositivo y no se vuelve a pedir.
+
+Dos aclaraciones sobre eso:
+
+- La clave de las páginas es una barrera de conveniencia: el sitio es estático, así que quien mire el código la encuentra.
+- El borrado sí está protegido de verdad: la clave viaja a la base y las funciones `admin_list_fish` y `admin_delete_fish` no devuelven ni borran nada sin ella. Se crean con `supabase/admin.sql`.
+
+El archivo PNG queda en Storage aunque se borre la fila, porque Supabase no permite borrarlo por SQL.
 
 ## Agregar una especie
 

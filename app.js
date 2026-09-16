@@ -6,6 +6,10 @@
 import { mul, inv, affineToH, hMul, hApply } from './geometry.js';
 import { SpeciesScanner, parsePath, SEARCH_FROM_OVERLAY, SEARCH_FROM_PREVIOUS } from './autoscan.js';
 import { saveScan, isConfigured } from './storage.js';
+import { pedirClave } from './gate.js';
+
+// La página de capturar queda detrás de la misma clave que el panel.
+if (!pedirClave('Escáner de peces')) throw new Error('sin clave');
 
 const OUT_W = 1600;       // ancho del PNG de salida (px)
 const MARGIN_MM = 3;      // margen alrededor del pez al encuadrar y recortar

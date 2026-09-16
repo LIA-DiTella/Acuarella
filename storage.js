@@ -73,6 +73,12 @@ export async function saveScan(blob, species, job = {}) {
   return { ...job.row, url: publicUrl(job.row.filename) };
 }
 
+/** Panel: todos los escaneos subidos, incluidos los que hoy no están en el acuario. Requiere la clave. */
+export const adminList = (key) => rpc('admin_list_fish', { p_key: key });
+
+/** Panel: borra la fila del escaneo. El PNG queda en Storage (Supabase no deja borrarlo por SQL). */
+export const adminDelete = (id, key) => rpc('admin_delete_fish', { p_id: id, p_key: key });
+
 /** Peces que tienen que estar en el acuario ahora (permanentes + visitantes activos). */
 export const fetchAquarium = () => request(
   '/rest/v1/aquarium_fish?select=id,species,filename,created_at,permanent,activated_at&order=id',
