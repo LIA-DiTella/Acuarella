@@ -39,6 +39,7 @@ Parámetros de URL:
 - `aquarium.html?demo=1`: funciona sin base.
 - `&debug=1`: muestra conteos, fps y la próxima rotación.
 - `&quality=low|medium|high`: calidad del render (por defecto según el ancho de pantalla).
+- `&speed=N`: acelera la simulación de los peces, para ver entradas, escondites y loops sin esperar.
 
 ## Agregar una especie
 

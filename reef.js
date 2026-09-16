@@ -85,27 +85,17 @@ float waterCaustic(vec2 p) {
   return .7*flowing(p*.19,t)+.3*flowing(p*.273,11.-t);
 }`;
 
-  function waterMaterial(mat) {
-    if (mat.normalScale) mat.normalScale.setScalar(/rock/.test(mat.name) ? .32 : .24);
-    if ('transmission' in mat) mat.transmission = 0;
-    const flexible = /grass|fan|soft/.test(mat.name);
-    const family = (mat.name.match(/PBR • ([^•]+) •/) || [])[1]?.trim() || '';
-    const plantAmplitude = family === 'grass' ? .036 : family === 'fan' ? .026 : family === 'soft' ? .013 : 0;
-    const materialCaustic = family === 'sand' ? 1.65 : family === 'rock' ? .3 : ((family === 'grass' || family === 'fan') ? .48 : .7);
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, shared);
-      shader.uniforms.uMaterialCaustic = { value: materialCaustic };
-      shader.vertexShader = 'uniform float uReefPhase; varying vec3 vReefWorld; varying vec3 vReefNormal;\n' + shader.vertexShader;
-      if (flexible) shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
-        vec3 reefOrigin=vec3(modelMatrix[3]);
-        #ifdef USE_INSTANCING
-          reefOrigin=(modelMatrix*instanceMatrix*vec4(0.,0.,0.,1.)).xyz;
-        #endif
-        float plantPhase=dot(reefOrigin.xz,vec2(.173,.317));
-        float rootedHeight=max(position.z,0.0);
-        float plantGain=.7+.3*sin(plantPhase*2.17);
-        transformed.x+=sin(uReefPhase+plantPhase+position.z*1.35)*${plantAmplitude.toFixed(4)}*rootedHeight*plantGain;
-        transformed.y+=cos(uReefPhase+plantPhase*.83+position.z*.9)*${(plantAmplitude * .38).toFixed(4)}*rootedHeight*plantGain;`);
+  /**
+   * Iluminación del agua: cáusticas proyectadas, atenuación por distancia y niebla azul.
+   * La usan los materiales del arrecife y también los peces del acuario, para que queden integrados en la escena.
+   * `vertexChunk` permite agregar deformaciones propias (el vaivén de las plantas, la ondulación de los peces).
+   */
+  function applyWater(material, { caustic = .7, uniforms = {}, vertexDeclarations = '', vertexChunk = '', cacheKey = 'water-v1' } = {}) {
+    material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, shared, uniforms);
+      shader.uniforms.uMaterialCaustic = { value: caustic };
+      shader.vertexShader = `uniform float uReefPhase; varying vec3 vReefWorld; varying vec3 vReefNormal;\n${vertexDeclarations}\n` + shader.vertexShader;
+      if (vertexChunk) shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${vertexChunk}`);
       shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
         vec4 reefPosition=vec4(transformed,1.0); vec3 reefNormal=objectNormal;
         #ifdef USE_INSTANCING
@@ -136,7 +126,29 @@ float waterCaustic(vec2 p) {
         #include <opaque_fragment>`);
       shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', '');
     };
-    mat.customProgramCacheKey = () => (flexible ? `reef-flex-${family}-v3` : `reef-solid-${family}-v3`);
+    material.customProgramCacheKey = () => cacheKey;
+  }
+
+  function waterMaterial(mat) {
+    if (mat.normalScale) mat.normalScale.setScalar(/rock/.test(mat.name) ? .32 : .24);
+    if ('transmission' in mat) mat.transmission = 0;
+    const flexible = /grass|fan|soft/.test(mat.name);
+    const family = (mat.name.match(/PBR • ([^•]+) •/) || [])[1]?.trim() || '';
+    const plantAmplitude = family === 'grass' ? .036 : family === 'fan' ? .026 : family === 'soft' ? .013 : 0;
+    applyWater(mat, {
+      caustic: family === 'sand' ? 1.65 : family === 'rock' ? .3 : ((family === 'grass' || family === 'fan') ? .48 : .7),
+      cacheKey: flexible ? `reef-flex-${family}-v3` : `reef-solid-${family}-v3`,
+      vertexChunk: flexible ? `
+        vec3 reefOrigin=vec3(modelMatrix[3]);
+        #ifdef USE_INSTANCING
+          reefOrigin=(modelMatrix*instanceMatrix*vec4(0.,0.,0.,1.)).xyz;
+        #endif
+        float plantPhase=dot(reefOrigin.xz,vec2(.173,.317));
+        float rootedHeight=max(position.z,0.0);
+        float plantGain=.7+.3*sin(plantPhase*2.17);
+        transformed.x+=sin(uReefPhase+plantPhase+position.z*1.35)*${plantAmplitude.toFixed(4)}*rootedHeight*plantGain;
+        transformed.y+=cos(uReefPhase+plantPhase*.83+position.z*.9)*${(plantAmplitude * .38).toFixed(4)}*rootedHeight*plantGain;` : '',
+    });
   }
 
   // Degradado continuo de la superficie al fondo, válido desde cualquier rumbo.
@@ -261,7 +273,7 @@ float waterCaustic(vec2 p) {
 
   let time = 0;
   return {
-    scene, camera, renderer, shared, setQuality,
+    scene, camera, renderer, shared, setQuality, applyWater,
     get quality() { return quality; },
     /** Avanza el ciclo del agua y dibuja. Los peces se agregan a `scene` desde el acuario. */
     render(dt) {
