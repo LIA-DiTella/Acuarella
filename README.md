@@ -20,6 +20,8 @@ El escáner busca el borde grueso impreso cerca del contorno esperado. Corrige p
 
 ## Acuario
 
+El fondo es el arrecife 3D de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)), con la cámara fija. Los peces escaneados nadan por el cañón como planos que ondulan, así que se ven en 3D aunque sean dibujos.
+
 Muestra los peces fijos (`permanent`) y los visitantes activos.
 
 - **Escaneos nuevos:** entran al instante.
@@ -35,7 +37,8 @@ update fish set permanent = true where id = 12;        -- fijar un pez
 Parámetros de URL:
 
 - `aquarium.html?demo=1`: funciona sin base.
-- `&debug=1`: muestra conteos y la próxima rotación.
+- `&debug=1`: muestra conteos, fps y la próxima rotación.
+- `&quality=low|medium|high`: calidad del render (por defecto según el ancho de pantalla).
 
 ## Agregar una especie
 
