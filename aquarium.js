@@ -1,7 +1,12 @@
 // Acuario: el arrecife 3D de Martín como fondo (reef.js) y los peces escaneados como planos 2.5D que nadan por el
 // cañón, iluminados con el mismo shader de agua que el arrecife. La cámara es fija.
-// Regla de oro del movimiento: ningún pez aparece ni desaparece a la vista. Entran desde atrás de la cámara o
-// desde fuera del cuadro, y se van saliendo del cuadro o metiéndose en un coral que los tapa de verdad.
+//
+// Regla de oro: ningún pez aparece ni desaparece a la vista.
+//  - Aparecen entrando por un costado del cuadro, o desde atrás de la cámara, o saliendo de un coral que los tapa.
+//  - Se van saliendo del cuadro, o metiéndose en un coral, y solo se apagan cuando un rayo desde la cámara
+//    confirma que el coral está delante.
+//  - La entrada desde la cámara termina justo a velocidad de crucero, para que no haya corte de velocidad
+//    ni de dirección al pasar a nado normal.
 
 import * as THREE from 'three';
 import { createReef } from './reef.js';
@@ -13,26 +18,27 @@ const DEBUG = params.has('debug');
 const POLL_MS = DEMO ? 5000 : 20000;
 const ROTATE_MS = 2 * 60 * 60 * 1000;  // igual que el cron de supabase/schema.sql
 const DEMO_ROTATE_MS = 15000;          // en demo la rotación se acelera para verla
-// ?speed=N acelera la simulación de los peces: sirve para ver entradas, escondites y loops sin esperar.
+// ?speed=N acelera la simulación de los peces: sirve para ver entradas, escondites y cruces sin esperar.
 const SPEED = Math.min(Math.max(Number(params.get('speed')) || 1, 0.25), 20);
 
 const BASE_LENGTH = 1.5;   // metros que mide un pez con scale 1 (la piraña)
 const HEIGHT = [1.2, 6.2]; // altura sobre el fondo en la franja media
-const CRUISE_SPEED = 0.8;  // referencia de velocidad: con esto el aleteo está al máximo
+const CRUISE_SPEED = 0.8;  // referencia: con esta velocidad el aleteo está al máximo
 
 /** Hasta dónde se aleja del centro antes de decidir qué hace: crece con la distancia, sin salir del cañón. */
 const xLimit = (z) => Math.min(2 + Math.abs(z) * 0.6, 7);
-/** Más allá de esto el pez ya salió del cuadro (la cámara abre ~1,1 × la distancia hacia cada lado). */
-const offscreenX = (z, length) => Math.abs(z) * 1.15 + length + 1;
 
-/**
- * Escondites: dentro de los dos montículos de coral y de las rocas del fondo. El pez se mete, y recién se apaga
- * cuando está detrás del coral, que lo tapa de verdad.
- */
+/** Mitad del ancho visible a esa profundidad, según la cámara real. Más allá de esto el pez salió del cuadro. */
+function offscreenX(z, length) {
+  const { fov, aspect } = reef.camera;
+  return Math.abs(z) * Math.tan(fov * Math.PI / 360) * aspect + length * 0.6 + 1;
+}
+
+/** Corales y rocas donde los peces se meten. La oclusión se comprueba con un rayo, no con estas medidas. */
 const HIDEOUTS = [
-  { x: -7.8, y: 2.4, z: -13, r: 2.6 },
-  { x: 7.8, y: 2.6, z: -12.5, r: 2.6 },
-  { x: 0.5, y: 1.8, z: -19.5, r: 2.2 },
+  { x: -7.8, y: 2.4, z: -13 },
+  { x: 7.8, y: 2.6, z: -12.5 },
+  { x: 0.5, y: 1.8, z: -19.5 },
 ];
 
 /**
@@ -75,9 +81,11 @@ const fish = new Map();
 const status = { rows: [], error: null, lastSync: 0, fps: 0 };
 const textures = new THREE.TextureLoader();
 const toCamera = new THREE.Vector3();
+const raycaster = new THREE.Raycaster();
+const rayDir = new THREE.Vector3();
 let reef, bubbles;
 
-// --- Burbujas (estela de las entradas rápidas y de las ráfagas)
+// --- Burbujas (estela de las entradas y de las ráfagas)
 
 function createBubbles(scene) {
   const N = 260;
@@ -165,7 +173,80 @@ function buildFish(texture, m) {
   return { mesh, uniforms, length, ampBase: height * 0.12 * m.wave, waveBase: 2.2 + 1.4 * m.speed };
 }
 
-/** `inside`: en la primera carga los peces ya están nadando; los que llegan después entran desde la cámara. */
+/** ¿Hay coral entre la cámara y el pez? Se prueban el centro y las dos puntas. */
+function occluded(f) {
+  const cam = reef.camera.position, p = f.mesh.position;
+  for (const dx of [-f.length * 0.35, 0, f.length * 0.35]) {
+    rayDir.set(p.x + dx - cam.x, p.y - cam.y, p.z - cam.z);
+    const distance = rayDir.length();
+    raycaster.set(cam, rayDir.normalize());
+    raycaster.far = distance - 0.1;
+    if (!raycaster.intersectObject(reef.root, true).length) return false;
+  }
+  return true;
+}
+
+/** Entra nadando desde un costado del cuadro, ya a velocidad de crucero. `extra` lo deja más lejos del borde. */
+function enterFromSide(f, extra = 0) {
+  const cruise = pickCruise();
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  Object.assign(f, {
+    mode: 'cruise', hidden: false, crossing: false, roll: 0, sprint: 1, speedNow: f.speed,
+    z: cruise.z, y: cruise.y, dir, face: dir,
+    x: -dir * (offscreenX(cruise.z, f.length) + extra),
+  });
+  f.mesh.visible = true;
+}
+
+/**
+ * Entrada desde atrás de la cámara: pasa al lado del espectador y se va integrando al nado.
+ * La velocidad se mezcla con la de crucero a lo largo del recorrido, así que al llegar a su franja ya viene
+ * nadando de costado a velocidad normal: no hay corte de velocidad ni de dirección.
+ */
+function startEntry(f) {
+  const cruise = pickCruise();
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  f.entry = {
+    z0: 3 + Math.random() * 1.5,
+    y0: 1.6 + Math.random() * 2.2,
+    vx0: dir * (0.7 + Math.random() * 0.6),  // poco arrastre lateral: si no, termina la entrada contra el borde
+    vz0: -(5.5 + Math.random() * 2.5),
+    targetZ: Math.max(cruise.z, -12),  // se acomoda cerca o a media distancia, nunca al fondo
+    targetY: cruise.y,
+  };
+  Object.assign(f, {
+    mode: 'entry', hidden: false, crossing: false, roll: 0, sprint: 1, trail: 0,
+    x: -dir * (1 + Math.random() * 2), y: f.entry.y0, z: f.entry.z0, dir, face: dir,
+  });
+  f.mesh.visible = true;
+}
+
+function updateEntry(f, dt) {
+  const e = f.entry;
+  const s = Math.min(1, Math.max(0, (e.z0 - f.z) / (e.z0 - e.targetZ)));
+  const ease = s * s * (3 - 2 * s);
+  const vx = e.vx0 + (f.dir * f.speed - e.vx0) * ease;  // termina exactamente a velocidad de crucero
+  const vz = e.vz0 + (-0.12 - e.vz0) * ease;            // y deja de alejarse
+  f.x += vx * dt;
+  f.z += vz * dt;
+  f.y = e.y0 + (e.targetY - e.y0) * ease;
+  f.speedNow = Math.hypot(vx, vz);
+  if (s < 0.45) {
+    f.trail -= dt;
+    if (f.trail <= 0) {
+      f.trail = 0.05;
+      bubbles.emit(f.x, f.y, f.z, 2);
+    }
+  }
+  // Con el suavizado casi completo la velocidad ya es la de crucero (diferencia < 1 %), así que se pasa a nado
+  // normal sin esperar a que la z llegue exacta: esa cola larguísima arrastraba al pez hasta el borde del cuadro.
+  if (f.z <= e.targetZ || s > 0.95) {
+    f.mode = 'cruise';
+    f.speedNow = f.speed;
+  }
+}
+
+/** `inside`: en la primera carga entran desde los costados, escalonados. Los que llegan después, desde la cámara. */
 async function spawn(row, inside = false) {
   fish.set(row.id, { row, mesh: null });  // reserva el lugar mientras carga la textura
   try {
@@ -173,21 +254,20 @@ async function spawn(row, inside = false) {
     const url = DEMO ? `aquarium/demo/${row.filename}` : publicUrl(row.filename);
     const built = buildFish(await textures.loadAsync(url), m);
     if (!fish.has(row.id)) return;  // se fue mientras cargaba
-    const cruise = pickCruise();
-    const dir = Math.random() < 0.5 ? 1 : -1;
     const f = {
-      row, ...built, mode: 'cruise', dir, face: dir, roll: 0, sprint: 1, speedNow: 0,
-      hidden: false, leaving: false, crossing: false,
-      x: (Math.random() * 1.6 - 0.8) * xLimit(cruise.z), y: cruise.y, z: cruise.z,
+      row, ...built, mode: 'cruise', dir: 1, face: 1, roll: 0, sprint: 1, speedNow: 0,
+      hidden: false, leaving: false, crossing: false, x: 0, y: 2, z: -10,
       bob: 0.15 + Math.random() * 0.4,
       phase: Math.random() * Math.PI * 2,
       speed: (0.55 + Math.random() * 0.45) * m.speed,
       burst: 4 + Math.random() * 12,
       loopIn: 20 + Math.random() * 60,
+      hideIn: 35 + Math.random() * 70,
     };
     fish.set(row.id, f);
     reef.scene.add(f.mesh);
-    if (!inside) startDive(f);
+    if (inside) enterFromSide(f, Math.random() * 14);  // escalonados: van llegando de a uno
+    else startEntry(f);
   } catch (err) {
     console.warn(err.message);
     fish.delete(row.id);
@@ -202,52 +282,6 @@ function despawn(id) {
   f.mesh.geometry.dispose();
   f.mesh.material.map.dispose();
   f.mesh.material.dispose();
-}
-
-/** Entrada desde atrás de la cámara: pasa al lado del espectador dejando burbujas y se suma al nado. */
-function startDive(f) {
-  const side = Math.random() < 0.5 ? -1 : 1;
-  Object.assign(f, {
-    mode: 'dive', hidden: false, crossing: false, roll: 0, sprint: 1,
-    x: side * (1.2 + Math.random() * 2.2),
-    y: 1.8 + Math.random() * 2.4,
-    z: 2.5 + Math.random() * 2,          // detrás de la cámara, que está en z = 0
-    vx: -side * (0.5 + Math.random() * 1.2),
-    vy: 0,
-    vz: -(8 + Math.random() * 5),
-    // Se acomodan cerca o a media distancia: una entrada que sigue de largo hasta el fondo se lee rarísima.
-    target: { z: -4 - Math.random() * 7, y: 1.2 + Math.random() * 3.4 },
-    trail: 0,
-  });
-  f.dir = f.vx >= 0 ? 1 : -1;
-  f.face = f.dir;
-  f.mesh.visible = true;
-}
-
-/**
- * Frena de a poco y se endereza hacia su franja. No hay saltos de posición: cuando llega a la profundidad de
- * destino simplemente sigue nadando desde donde está, mezclado con el resto.
- */
-function updateDive(f, dt) {
-  const damp = Math.pow(0.55, dt);
-  f.vx *= damp;
-  f.vz *= damp;
-  if (f.vz > -1.8) f.vz = -1.8;  // sigue avanzando hasta meterse en la escena
-  f.vy += ((f.target.y - f.y) * 0.9 - f.vy) * Math.min(1, dt * 2.5);
-  f.x += f.vx * dt;
-  f.y += f.vy * dt;
-  f.z += f.vz * dt;
-  f.speedNow = Math.hypot(f.vx, f.vy, f.vz);
-  f.trail -= dt;
-  if (f.trail <= 0 && f.speedNow > 3) {
-    f.trail = 0.04;
-    bubbles.emit(f.x, f.y, f.z, 2);
-  }
-  if (f.z <= f.target.z) {
-    f.mode = 'cruise';
-    f.dir = f.vx >= 0 ? 1 : -1;
-    f.face = f.dir;
-  }
 }
 
 /** Loop vertical: muy de vez en cuando, y el cuerpo acompaña el giro. */
@@ -267,48 +301,58 @@ function updateLoop(f, dt) {
   }
 }
 
-/** Se mete en un coral, se queda un rato tapado y vuelve a salir del mismo lugar (o entra desde la cámara). */
-function startHide(f, diveBack = false) {
+/**
+ * Se mete nadando en un coral. No se apaga por distancia: sigue avanzando hasta que un rayo desde la cámara
+ * confirma que el coral lo tapa. Si no lo logra, vuelve a nadar: nunca desaparece en agua abierta.
+ */
+function startHide(f, entryBack = false) {
   const near = HIDEOUTS.reduce((best, h) => {
     const d = (h.x - f.x) ** 2 + (h.z - f.z) ** 2;
     return d < ((best.x - f.x) ** 2 + (best.z - f.z) ** 2) ? h : best;
   });
-  Object.assign(f, { mode: 'hide', hideout: near, hidden: false, hideTimer: 0, giveUp: 14, crossing: false, diveBack });
+  Object.assign(f, { mode: 'hide', hideout: near, hidden: false, hideTimer: 0, giveUp: 16, check: 0, crossing: false, entryBack });
 }
 
 function updateHide(f, dt) {
   const h = f.hideout;
-  if (!f.hidden) {
-    const dx = h.x - f.x, dy = h.y - f.y, dz = h.z - f.z;
-    const d = Math.hypot(dx, dy, dz) || 1;
-    const step = f.speed * 1.3;
-    f.x += dx / d * step * dt;
-    f.y += dy / d * step * dt;
-    f.z += dz / d * step * dt;
-    f.dir = dx >= 0 ? 1 : -1;
-    f.speedNow = step;
-    f.giveUp -= dt;
-    // Solo se apaga cuando está metido y por detrás del coral: ahí el coral ya lo tapa.
-    if (d < h.r * 0.5 && f.z <= h.z + 0.3) {
+  if (f.hidden) {
+    f.hideTimer -= dt;
+    if (f.hideTimer > 0) return;
+    if (f.entryBack || Math.random() < 0.35) {
+      f.entryBack = false;
+      startEntry(f);  // vuelve entrando desde la cámara
+      return;
+    }
+    // Reaparece donde se escondió (posición comprobadamente tapada) y sale nadando del coral.
+    f.hidden = false;
+    f.mode = 'cruise';
+    f.dir = h.x < 0 ? 1 : -1;
+    f.face = f.dir;
+    f.mesh.visible = true;
+    return;
+  }
+
+  // Nada hacia el fondo del coral, un poco más allá de su centro.
+  const dx = h.x - f.x, dy = h.y - f.y, dz = (h.z - 1.2) - f.z;
+  const d = Math.hypot(dx, dy, dz) || 1;
+  const step = f.speed * 1.15;
+  f.x += dx / d * step * dt;
+  f.y += dy / d * step * dt;
+  f.z += dz / d * step * dt;
+  f.dir = dx >= 0 ? 1 : -1;
+  f.speedNow = step;
+  f.giveUp -= dt;
+  f.check -= dt;
+  if (f.check <= 0) {
+    f.check = 0.2;
+    if (occluded(f)) {
       f.hidden = true;
       f.mesh.visible = false;
-      f.hideTimer = 2.5 + Math.random() * 5;
-    } else if (f.giveUp <= 0) {
-      f.mode = 'cruise';  // si no llegó, sigue nadando en vez de desaparecer donde sea
+      f.hideTimer = 3 + Math.random() * 6;
+      return;
     }
-    return;
   }
-  f.hideTimer -= dt;
-  if (f.hideTimer > 0) return;
-  if (f.diveBack || Math.random() < 0.35) {
-    f.diveBack = false;
-    startDive(f);
-    return;
-  }
-  // Sale del mismo coral, todavía tapado, y se aleja hacia el centro del cañón.
-  const out = h.x < 0 ? 1 : -1;
-  Object.assign(f, { hidden: false, mode: 'cruise', x: h.x + out * h.r * 0.4, y: h.y, z: h.z - 0.4, dir: out, face: out });
-  f.mesh.visible = true;
+  if (f.giveUp <= 0) f.mode = 'cruise';  // no lo logró: sigue nadando en vez de desaparecer
 }
 
 /** Sale del cuadro y vuelve a entrar por el lado opuesto: da la ilusión de que el mar sigue más allá. */
@@ -330,10 +374,18 @@ function updateCruise(f, dt) {
     f.burst = 7 + Math.random() * 16;
     if (Math.random() < 0.5) f.sprint = 2 + Math.random() * 1.4;
   }
-  f.loopIn -= dt;
-  if (f.loopIn <= 0) {
-    f.loopIn = 35 + Math.random() * 70;
-    if (!f.leaving && !f.crossing && Math.random() < 0.5) return startLoop(f);
+  if (!f.leaving && !f.crossing) {
+    f.loopIn -= dt;
+    if (f.loopIn <= 0) {
+      f.loopIn = 35 + Math.random() * 70;
+      if (Math.random() < 0.5) return startLoop(f);
+    }
+    // Meterse en un coral es una decisión, no la consecuencia de chocar contra el borde.
+    f.hideIn -= dt;
+    if (f.hideIn <= 0) {
+      f.hideIn = 50 + Math.random() * 90;
+      if (Math.random() < 0.6) return startHide(f);
+    }
   }
 
   const speed = f.speed * f.sprint;
@@ -343,14 +395,16 @@ function updateCruise(f, dt) {
 
   if (f.leaving) return;  // sigue derecho hasta salir del cuadro; lo quita updateFish
   if (f.crossing) {
-    if (Math.abs(f.x) > offscreenX(f.z, f.length)) wrapAround(f);
+    if (Math.abs(f.x) > offscreenX(f.z, f.length)) {
+      if (Math.random() < 0.3) startEntry(f);  // ya está fuera de vista: puede volver desde la cámara
+      else wrapAround(f);
+    }
     return;
   }
   const limit = xLimit(f.z);
   if ((f.x > limit && f.dir > 0) || (f.x < -limit && f.dir < 0)) {
-    const choice = Math.random();
-    if (choice < 0.18) startHide(f);
-    else if (choice < 0.5) f.crossing = true;  // se va del cuadro y reaparece por el otro lado
+    // Casi siempre sigue derecho y se va del cuadro; rebotar contra el borde se nota y queda mal.
+    if (Math.random() < 0.72) f.crossing = true;
     else f.dir *= -1;
   }
 }
@@ -378,8 +432,12 @@ function place(f, dt, t) {
 
 /** Avanza un pez; devuelve false cuando ya salió del cuadro y se puede quitar sin que se note. */
 function updateFish(f, dt, t) {
-  if (f.leaving && f.hidden) return false;  // ya estaba tapado por el coral
-  if (f.mode === 'dive') updateDive(f, dt);
+  if (f.hidden) {  // tapado por el coral: no se mueve ni se dibuja
+    if (f.leaving) return false;
+    updateHide(f, dt);
+    return true;
+  }
+  if (f.mode === 'entry') updateEntry(f, dt);
   else if (f.mode === 'loop') updateLoop(f, dt);
   else if (f.mode === 'hide') updateHide(f, dt);
   else updateCruise(f, dt);
@@ -402,7 +460,7 @@ async function sync() {
       if (!ids.has(id) && !f.leaving) {
         f.leaving = true;
         f.crossing = false;
-        if (f.mode !== 'hide') f.mode = 'cruise';
+        if (!f.hidden && f.mode !== 'hide') f.mode = 'cruise';
         f.dir = f.x < 0 ? -1 : 1;  // se va nadando por el lado más cercano
       }
     }
@@ -417,7 +475,11 @@ function drawDebug(now) {
   const period = DEMO ? DEMO_ROTATE_MS : ROTATE_MS;
   const left = Math.ceil(now / period) * period - now;
   const modes = {};
-  for (const f of fish.values()) if (f.mesh) modes[f.crossing ? 'cross' : f.mode] = (modes[f.crossing ? 'cross' : f.mode] ?? 0) + 1;
+  for (const f of fish.values()) {
+    if (!f.mesh) continue;
+    const key = f.hidden ? 'oculto' : f.crossing ? 'cross' : f.mode;
+    modes[key] = (modes[key] ?? 0) + 1;
+  }
   document.getElementById('debug').textContent = [
     `modo: ${DEMO ? 'demo (rotación cada 15 s)' : 'supabase'} · calidad: ${reef?.quality ?? '—'} · ${status.fps} fps`,
     `en el acuario: ${status.rows.length} (permanentes ${permanent} · visitantes ${status.rows.length - permanent})`,
@@ -450,7 +512,7 @@ await loadMeta();
 sync();
 setInterval(sync, POLL_MS);
 
-let last = performance.now(), frames = 0, fpsStart = last, diveTimer = 6 + Math.random() * 6;
+let last = performance.now(), frames = 0, fpsStart = last, entryTimer = 12 + Math.random() * 10;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000) * SPEED;
@@ -458,16 +520,13 @@ function frame(now) {
   if (document.hidden) return;
   const t = now / 1000;
 
-  // Cada tanto entra alguno desde atrás de la cámara. Si hay uno escondido en un coral, sale ese (ya está fuera
-  // de vista, así que no se nota el salto); si no, se manda a esconder a uno del fondo para que vuelva por ahí.
-  diveTimer -= dt;
-  if (diveTimer <= 0) {
-    diveTimer = 10 + Math.random() * 14;
-    const swimmers = [...fish.values()].filter((f) => f.mesh && !f.leaving);
-    const hidden = swimmers.filter((f) => f.hidden);
-    const far = swimmers.filter((f) => f.mode === 'cruise' && !f.crossing && f.z < -8);
-    if (hidden.length) startDive(hidden[Math.floor(Math.random() * hidden.length)]);
-    else if (far.length) startHide(far[Math.floor(Math.random() * far.length)], true);
+  // Cada tanto entra alguno desde atrás de la cámara, pero solo si está fuera de vista (escondido en un coral):
+  // así nunca se ve un salto de posición.
+  entryTimer -= dt;
+  if (entryTimer <= 0) {
+    entryTimer = 12 + Math.random() * 16;
+    const hidden = [...fish.values()].filter((f) => f.mesh && f.hidden && !f.leaving);
+    if (hidden.length) startEntry(hidden[Math.floor(Math.random() * hidden.length)]);
   }
 
   for (const [id, f] of [...fish]) {
@@ -491,5 +550,5 @@ if (DEBUG) {
   setInterval(() => drawDebug(Date.now()), 500);
   // Estado crudo de cada pez y los disparadores, para inspeccionarlo y provocarlo desde las pruebas
   // (y desde la consola del navegador).
-  window.__aquarium = { fish, status, offscreenX, xLimit, startDive, startHide, startLoop };
+  window.__aquarium = { fish, status, offscreenX, xLimit, startEntry, startHide, startLoop, enterFromSide, occluded };
 }

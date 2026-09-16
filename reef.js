@@ -274,6 +274,7 @@ float waterCaustic(vec2 p) {
   let time = 0;
   return {
     scene, camera, renderer, shared, setQuality, applyWater,
+    root: gltf.scene,  // geometría del arrecife: el acuario la usa para saber si un coral tapa a un pez
     get quality() { return quality; },
     /** Avanza el ciclo del agua y dibuja. Los peces se agregan a `scene` desde el acuario. */
     render(dt) {
