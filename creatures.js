@@ -108,16 +108,16 @@ const SPECIES = {
     verticalDrift: .12,
   },
   estrella: {
-    width: 2.4,
-    heightRange: [1.1, 7.5],
-    radiusRange: [10, 17],
-    orbitSecondsRange: [200, 260],
-    bodyWaveAmplitude: .03,
+    width: 1.6,
+    heightRange: [0, 0],
+    radiusRange: [0, 0],
+    orbitSecondsRange: [14, 19],
+    swimStyle: 'star',
+    bodyWaveAmplitude: .05,
     tailAmplitude: .05,
-    tailFrequency: .25,
-    bodyStiffness: .5,
-    bankingStrength: .03,
-    verticalDrift: .4,
+    tailFrequency: .65,
+    bankingStrength: 0,
+    verticalDrift: 0,
   },
 };
 
@@ -158,6 +158,16 @@ function configureMaterial(texture, config, side, tint) {
       float tail=smoothstep(.63,.97,uv.x);
       transformed.y+=sin(uFishPhase*1.6-uv.x*5.0)*tail*.025*uFishMotion;
       transformed.z+=sin(uFishPhase*1.5-uv.x*4.0)*tail*${config.tailAmplitude.toFixed(4)}*uFishMotion;`
+      : config.swimStyle === 'star' ? `
+      float radius=length(transformed.xy)*2.0;
+      float armAngle=atan(transformed.y,transformed.x);
+      float arm=pow(.5+.5*cos(5.0*armAngle),2.0);
+      float edge=smoothstep(.12,.92,radius);
+      float armDelay=floor((armAngle+3.14159265)/1.25663706)*.34;
+      float angel=sin(uFishPhase*.72+armDelay);
+      float settle=.5+.5*sin(uFishPhase*.72-.28);
+      transformed.xy*=1.0+angel*(.026+.058*arm)*edge*uFishMotion;
+      transformed.z+=(.014+.018*settle+.036*arm*edge*(.5+.5*angel))*uFishMotion;`
       : `
       float tailCoord=${tailIsRight ? 'uv.x' : '1.0-uv.x'};
       float flexible=smoothstep(${config.bodyStiffness.toFixed(4)},1.0,tailCoord);
@@ -182,16 +192,41 @@ function configureMaterial(texture, config, side, tint) {
  * `urlOf(entry)` decide de dónde sale la imagen (Supabase o la carpeta de demo).
  * `sync(rows)` recibe las filas del acuario en vez del manifiesto de archivos que usa él.
  */
-export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sandHeight = () => 0 }) {
+export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sandHeight = () => 0, starPatches = [] }) {
   const root = new THREE.Group();
   root.name = 'Animated sea creatures';
   scene.add(root);
   const geometry = new THREE.PlaneGeometry(1, 1, 48, 6);
   const rayGeometry = new THREE.PlaneGeometry(1, 1, 48, 24);
+  const starGeometry = new THREE.PlaneGeometry(1, 1, 32, 32);
   const creatures = new Map(), pending = new Map();
   const center = camera.position.clone();
   const splashes = [];
   let hasSynced = false, lastOrbitTime = 0;
+
+  function findStarAnchor(seed) {
+    camera.updateMatrixWorld();
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const ranked = starPatches.map(([x, z]) => {
+      const direction = new THREE.Vector3(x - center.x, 0, z - center.z);
+      const distance = direction.length();
+      const viewAlignment = direction.normalize().dot(forward);
+      return { x, z, viewAlignment, score: viewAlignment * 2 - Math.abs(distance - 14) * .04 };
+    }).filter((patch) => patch.viewAlignment > .35)
+      .sort((a, b) => b.score - a.score);
+    const pool = ranked.length ? ranked : starPatches.map(([x, z]) => ({ x, z }));
+    const first = Math.floor(randomAt(seed, 80) * Math.min(pool.length, 6));
+    for (let i = 0; i < pool.length; i++) {
+      const { x, z } = pool[(first + i) % pool.length];
+      const clearOfOtherStars = [...creatures.values()]
+        .filter((creature) => creature.config.swimStyle === 'star')
+        .every((creature) => creature.anchor.distanceToSquared(new THREE.Vector3(x, 0, z)) > 9);
+      if (clearOfOtherStars) return new THREE.Vector3(x, sandHeight(x, z) + .12, z);
+    }
+    const [x, z] = starPatches[0] || [center.x, center.z];
+    return new THREE.Vector3(x, sandHeight(x, z) + .12, z);
+  }
 
   function splashAt(origin, seed, startTime) {
     const group = new THREE.Group();
@@ -312,7 +347,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
         config.swimStyle === 'ray' ? 0xffffff : 0xe8f2f5);
       const group = new THREE.Group();
       group.name = `Fish • ${entry.species} • ${entry.id}`;
-      const meshGeometry = config.swimStyle === 'ray' ? rayGeometry : geometry;
+      const meshGeometry = config.swimStyle === 'ray' ? rayGeometry
+        : config.swimStyle === 'star' ? starGeometry : geometry;
       const frontMesh = new THREE.Mesh(meshGeometry, front), backMesh = new THREE.Mesh(meshGeometry, back);
       frontMesh.position.z = .018;
       backMesh.position.z = -.018;
@@ -324,6 +360,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
 
       const creature = {
         ...entry, group, texture, materials: [front, back], seed, config,
+        anchor: config.swimStyle === 'star' ? findStarAnchor(seed) : null,
+        starAngle: randomAt(seed, 75) * TAU,
         radius: range(config.radiusRange, randomAt(seed, 2)),
         radiusRatio: THREE.MathUtils.lerp(.82, 1.16, randomAt(seed, 3)),
         height: range(config.heightRange, randomAt(seed, 4)),
@@ -347,7 +385,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
         verticalVelocity: 0,
         entrance: null,
       };
-      if (entering) {
+      if (entering && config.swimStyle !== 'star') {
         camera.updateMatrixWorld();
         const forward = new THREE.Vector3();
         camera.getWorldDirection(forward);
@@ -411,6 +449,11 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
   }
 
   function route(creature, orbitTime, target, advance = 0) {
+    if (creature.config.swimStyle === 'star') {
+      target.copy(creature.anchor);
+      target.y = sandHeight(target.x, target.z) + .12;
+      return target;
+    }
     const t = routeAngle(creature, orbitTime + advance);
     const radial = creature.radius + Math.sin(t * 2 + creature.routePhase) * 2.35 + Math.sin(t * 3 + creature.phase) * 1.15;
     let depthWander = 0;
@@ -432,10 +475,18 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       route(creature, orbitTime, ahead, .3);
       const metresPerSecond = position.distanceTo(ahead) / .3;
       const nominalSpeed = TAU * creature.radius / creature.orbitSeconds;
-      creature.speedFactor = THREE.MathUtils.clamp(metresPerSecond / nominalSpeed, .2, 2.4);
+      creature.speedFactor = creature.config.swimStyle === 'star' ? .2
+        : THREE.MathUtils.clamp(metresPerSecond / nominalSpeed, .2, 2.4);
       creature.verticalVelocity = (ahead.y - position.y) / .3;
       travel.subVectors(ahead, position).normalize();
-      if (creature.config.swimStyle === 'ray') {
+      if (creature.config.swimStyle === 'star') {
+        xAxis.set(Math.cos(creature.starAngle), 0, Math.sin(creature.starAngle));
+        // A small viewer-facing tilt keeps the starfish readable while it remains settled on the sand.
+        zAxis.set(camera.position.x - position.x, 0, camera.position.z - position.z);
+        zAxis.addScaledVector(xAxis, -zAxis.dot(xAxis)).normalize();
+        zAxis.multiplyScalar(.32).add(worldUp).normalize();
+        yAxis.crossVectors(zAxis, xAxis).normalize();
+      } else if (creature.config.swimStyle === 'ray') {
         xAxis.set(travel.x, 0, travel.z).normalize()
           .multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);
         // Lean the disc toward the viewer so both its top and underside stay readable.
@@ -487,13 +538,15 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
 
       const routePhase = routeAngle(creature, orbitTime);
       const turn = Math.sin(routePhase * 2 + creature.routePhase);
-      if (!falling) {
+      if (!falling && creature.config.swimStyle !== 'star') {
         creature.group.rotateX(turn * creature.config.bankingStrength * motionScale * swimBlend);
         creature.group.rotateY(Math.sin(orbitTime * .37 + creature.phase) * .025 * motionScale * swimBlend);
       }
       // La fase de la cola la manda el avance de la ruta: cuanto más rápido viaja, más rápido bate.
       const routeProgress = (routePhase - creature.startAngle) * creature.direction;
-      const swimPhase = routeProgress * creature.tailRate * creature.orbitSeconds + creature.phase;
+      const swimPhase = creature.config.swimStyle === 'star'
+        ? ambientTime * creature.tailRate + creature.phase
+        : routeProgress * creature.tailRate * creature.orbitSeconds + creature.phase;
       for (const material of creature.materials) {
         const uniforms = material.userData.fishUniforms;
         uniforms.phase.value = swimPhase;

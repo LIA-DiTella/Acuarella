@@ -54,6 +54,7 @@ const creatures = createCreatureSystem({
   scene: reef.scene,
   camera: reef.camera,
   sandHeight: reef.sandHeight,
+  starPatches: reef.starPatches,
   textureLoader: new THREE.TextureLoader(),
   urlOf: (entry) => entry.previewUrl || (DEMO ? `aquarium/demo/${entry.filename}` : publicUrl(entry.filename)),
 });
