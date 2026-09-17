@@ -438,6 +438,8 @@ float waterCaustic(vec2 p) {
       yaw += (targetYaw - yaw) * blend;
       pitch += (targetPitch - pitch) * blend;
       camera.rotation.set(pitch, yaw, 0, 'YXZ');
+      // Animated creatures have moving silhouettes, so refresh the Ultra shadow map as they swim.
+      renderer.shadowMap.needsUpdate = QUALITY[quality].shadows;
       if (QUALITY[quality].bloom) composer.render();
       else renderer.render(scene, camera);
     },

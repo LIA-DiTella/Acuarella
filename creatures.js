@@ -9,7 +9,7 @@ const SWIM_IN_SECONDS = 2.5;
 const SPLASH_SECONDS = 2.1;
 const BOUNCE_FREQUENCY = 7.5;
 const BOUNCE_DAMPING = 3;
-const STAR_SAND_CLEARANCE = .28;
+const STAR_SAND_CLEARANCE = .22;
 
 function smoothstep(value) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
@@ -141,9 +141,11 @@ function range(pair, value) { return THREE.MathUtils.lerp(pair[0], pair[1], valu
 function configureMaterial(texture, config, side, tint) {
   const uniforms = { phase: { value: 0 }, motion: { value: 1 }, turn: { value: 0 }, speed: { value: 1 } };
   const tailIsRight = config.tailSide !== 'left';
-  const material = new THREE.MeshBasicMaterial({
+  const material = new THREE.MeshPhongMaterial({
     map: texture, color: tint, transparent: true, premultipliedAlpha: true,
-    alphaTest: .06, depthWrite: false, side, fog: true,
+    alphaTest: .06, depthWrite: true, side, fog: true,
+    shininess: 14, specular: 0x234b57,
+    emissive: tint, emissiveMap: texture, emissiveIntensity: .3,
   });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uFishPhase = uniforms.phase;
@@ -186,7 +188,7 @@ function configureMaterial(texture, config, side, tint) {
       transformed.y*=1.0-cos(uFishPhase*1.72)*.018*flexible*uFishMotion;`;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${deformation}`);
   };
-  material.customProgramCacheKey = () => `paper-fish-v5-${side}-${config.swimStyle || 'fish'}-${config.tailSide}-${config.bodyWaveAmplitude}-${config.tailAmplitude}-${config.bodyStiffness}`;
+  material.customProgramCacheKey = () => `paper-fish-v6-${side}-${config.swimStyle || 'fish'}-${config.tailSide}-${config.bodyWaveAmplitude}-${config.tailAmplitude}-${config.bodyStiffness}`;
   material.userData.fishUniforms = uniforms;
   return material;
 }
@@ -397,6 +399,12 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       backMesh.position.z = -.018;
       frontMesh.renderOrder = 5;
       backMesh.renderOrder = 4;
+      frontMesh.castShadow = true;
+      backMesh.castShadow = false;
+      frontMesh.receiveShadow = true;
+      // The reverse texture stays unshadowed so it cannot double the ray's own soft shadow.
+      backMesh.receiveShadow = config.swimStyle !== 'ray';
+      if (config.swimStyle === 'ray') frontMesh.material.shadowSide = THREE.DoubleSide;
       group.add(frontMesh, backMesh);
       group.scale.set(width, height, 1);
       root.add(group);
