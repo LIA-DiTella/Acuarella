@@ -54,6 +54,7 @@ const creatures = createCreatureSystem({
   scene: reef.scene,
   camera: reef.camera,
   sandHeight: reef.sandHeight,
+  sandSurface: reef.sandSurface,
   starPatches: reef.starPatches,
   textureLoader: new THREE.TextureLoader(),
   urlOf: (entry) => entry.previewUrl || (DEMO ? `aquarium/demo/${entry.filename}` : publicUrl(entry.filename)),
@@ -97,6 +98,14 @@ addEventListener('keydown', (event) => {
     testRows.push({
       id: `f3-${number}`, species: 'pirana', filename: 'pirana-1.png',
       previewUrl: 'aquarium/demo/pirana-1.png', permanent: false,
+    });
+    applyRows();
+  } else if (event.key === 'F4') {
+    event.preventDefault();
+    const number = testRows.filter((row) => row.species === 'estrella').length + 1;
+    testRows.push({
+      id: `f4-${number}`, species: 'estrella', filename: 'estrella-1.png',
+      previewUrl: 'aquarium/demo/estrella-1.png', permanent: false,
     });
     applyRows();
   }

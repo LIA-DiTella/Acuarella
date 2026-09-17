@@ -20,8 +20,8 @@ const CAMERA_Y = 3.8;
 const DRAG_SENSITIVITY = .0035;
 const CAMERA_SMOOTHING = .05;      // segundos; independiente de la tasa de cuadros
 
-// Index the sand triangles once so a creature can follow the basin without reading coral heights.
-function createSandHeight(mesh) {
+// Index the sand triangles once so creatures can sample both the sand height and its local slope.
+function createSandSurface(mesh) {
   const position = mesh.geometry.getAttribute('position');
   const indices = mesh.geometry.index;
   const vertices = Array.from({ length: position.count }, (_, i) =>
@@ -44,6 +44,7 @@ function createSandHeight(mesh) {
   return (x, z) => {
     const candidates = cells.get(`${Math.floor(x / cellSize)},${Math.floor(z / cellSize)}`) || [];
     let height = -Infinity;
+    let normal = null;
     for (const [a, b, c] of candidates) {
       const dx1 = b.x - a.x, dz1 = b.z - a.z;
       const dx2 = c.x - a.x, dz2 = c.z - a.z;
@@ -53,9 +54,16 @@ function createSandHeight(mesh) {
       const u = (px * dz2 - dx2 * pz) / determinant;
       const v = (dx1 * pz - px * dz1) / determinant;
       if (u < -1e-5 || v < -1e-5 || u + v > 1.00001) continue;
-      height = Math.max(height, a.y + u * (b.y - a.y) + v * (c.y - a.y));
+      const candidateHeight = a.y + u * (b.y - a.y) + v * (c.y - a.y);
+      if (candidateHeight > height) {
+        height = candidateHeight;
+        normal = new THREE.Vector3().crossVectors(
+          new THREE.Vector3().subVectors(b, a), new THREE.Vector3().subVectors(c, a),
+        ).normalize();
+        if (normal.y < 0) normal.negate();
+      }
     }
-    return Number.isFinite(height) ? height : 0;
+    return Number.isFinite(height) ? { height, normal } : { height: 0, normal: new THREE.Vector3(0, 1, 0) };
   };
 }
 const QUALITY = {
@@ -362,7 +370,8 @@ float waterCaustic(vec2 p) {
   scene.updateMatrixWorld(true);
   const sandMesh = renderables.filter((o) => [].concat(o.material).some((m) => /PBR • sand •/.test(m.name)))
     .sort((a, b) => b.geometry.getAttribute('position').count - a.geometry.getAttribute('position').count)[0];
-  const sandHeight = createSandHeight(sandMesh);
+  const sandSurface = createSandSurface(sandMesh);
+  const sandHeight = (x, z) => sandSurface(x, z).height;
   const box = new THREE.Box3();
   for (const o of renderables) {
     box.setFromObject(o);
@@ -417,6 +426,7 @@ float waterCaustic(vec2 p) {
     root: gltf.scene,
     get quality() { return quality; },
     sandHeight,
+    sandSurface,
     starPatches: STAR_PATCHES,
     get yaw() { return yaw; },
     /** Avanza el ciclo del agua, mueve el paneo y dibuja. Los peces se agregan a `scene` desde el acuario. */

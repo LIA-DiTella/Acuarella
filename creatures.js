@@ -9,6 +9,7 @@ const SWIM_IN_SECONDS = 2.5;
 const SPLASH_SECONDS = 2.1;
 const BOUNCE_FREQUENCY = 7.5;
 const BOUNCE_DAMPING = 3;
+const STAR_SAND_CLEARANCE = .28;
 
 function smoothstep(value) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
@@ -28,6 +29,7 @@ const DEFAULT_SPECIES = {
   bodyStiffness: .58,
   bankingStrength: .13,
   verticalDrift: 1,
+  minHeight: 1.5,
 };
 
 /** Una entrada por especie nuestra, con los mismos campos que usa él. */
@@ -108,14 +110,14 @@ const SPECIES = {
     verticalDrift: .12,
   },
   estrella: {
-    width: 1.6,
+    width: 2.08,
     heightRange: [0, 0],
     radiusRange: [0, 0],
     orbitSecondsRange: [14, 19],
     swimStyle: 'star',
     bodyWaveAmplitude: .05,
     tailAmplitude: .05,
-    tailFrequency: .65,
+    tailFrequency: .95,
     bankingStrength: 0,
     verticalDrift: 0,
   },
@@ -163,11 +165,12 @@ function configureMaterial(texture, config, side, tint) {
       float armAngle=atan(transformed.y,transformed.x);
       float arm=pow(.5+.5*cos(5.0*armAngle),2.0);
       float edge=smoothstep(.12,.92,radius);
-      float armDelay=floor((armAngle+3.14159265)/1.25663706)*.34;
-      float angel=sin(uFishPhase*.72+armDelay);
-      float settle=.5+.5*sin(uFishPhase*.72-.28);
-      transformed.xy*=1.0+angel*(.026+.058*arm)*edge*uFishMotion;
-      transformed.z+=(.014+.018*settle+.036*arm*edge*(.5+.5*angel))*uFishMotion;`
+      float armDelay=floor((armAngle+3.14159265)/1.25663706)*.46;
+      float angel=sin(uFishPhase*.95+armDelay);
+      float settle=.5+.5*sin(uFishPhase*.95-.42);
+      float center=1.0-smoothstep(.08,.7,radius);
+      transformed.xy*=1.0+angel*(.05+.13*arm)*edge*uFishMotion;
+      transformed.z+=(.018+.07*settle*center+.095*arm*edge*(.5+.5*angel))*uFishMotion;`
       : `
       float tailCoord=${tailIsRight ? 'uv.x' : '1.0-uv.x'};
       float flexible=smoothstep(${config.bodyStiffness.toFixed(4)},1.0,tailCoord);
@@ -192,7 +195,7 @@ function configureMaterial(texture, config, side, tint) {
  * `urlOf(entry)` decide de dónde sale la imagen (Supabase o la carpeta de demo).
  * `sync(rows)` recibe las filas del acuario en vez del manifiesto de archivos que usa él.
  */
-export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sandHeight = () => 0, starPatches = [] }) {
+export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sandHeight = () => 0, sandSurface, starPatches = [] }) {
   const root = new THREE.Group();
   root.name = 'Animated sea creatures';
   scene.add(root);
@@ -204,7 +207,9 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
   const splashes = [];
   let hasSynced = false, lastOrbitTime = 0;
 
-  function findStarAnchor(seed) {
+  const sampleSand = sandSurface || ((x, z) => ({ height: sandHeight(x, z), normal: new THREE.Vector3(0, 1, 0) }));
+
+  function findStarAnchor(seed, minimumSpacing) {
     camera.updateMatrixWorld();
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
@@ -212,20 +217,54 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       const direction = new THREE.Vector3(x - center.x, 0, z - center.z);
       const distance = direction.length();
       const viewAlignment = direction.normalize().dot(forward);
-      return { x, z, viewAlignment, score: viewAlignment * 2 - Math.abs(distance - 14) * .04 };
-    }).filter((patch) => patch.viewAlignment > .35)
+      return { x, z, distance, viewAlignment, score: viewAlignment * 2 - Math.abs(distance - 11) * .12 };
+    }).filter((patch) => patch.viewAlignment > .35 && patch.distance <= 16)
       .sort((a, b) => b.score - a.score);
     const pool = ranked.length ? ranked : starPatches.map(([x, z]) => ({ x, z }));
-    const first = Math.floor(randomAt(seed, 80) * Math.min(pool.length, 6));
+    const first = Math.floor(randomAt(seed, 80) * pool.length);
+    let bestAvailable;
+    let bestClearance = -Infinity;
     for (let i = 0; i < pool.length; i++) {
       const { x, z } = pool[(first + i) % pool.length];
-      const clearOfOtherStars = [...creatures.values()]
+      const nearestStar = [...creatures.values()]
         .filter((creature) => creature.config.swimStyle === 'star')
-        .every((creature) => creature.anchor.distanceToSquared(new THREE.Vector3(x, 0, z)) > 9);
-      if (clearOfOtherStars) return new THREE.Vector3(x, sandHeight(x, z) + .12, z);
+        .reduce((nearest, creature) => Math.min(nearest, creature.anchor.distanceToSquared(new THREE.Vector3(x, 0, z))), Infinity);
+      if (nearestStar > minimumSpacing * minimumSpacing) {
+        return new THREE.Vector3(x, sampleSand(x, z).height + .08, z);
+      }
+      if (nearestStar > bestClearance) {
+        bestClearance = nearestStar;
+        bestAvailable = { x, z };
+      }
     }
-    const [x, z] = starPatches[0] || [center.x, center.z];
-    return new THREE.Vector3(x, sandHeight(x, z) + .12, z);
+    const [x, z] = bestAvailable ? [bestAvailable.x, bestAvailable.z] : (starPatches[0] || [center.x, center.z]);
+    return new THREE.Vector3(x, sampleSand(x, z).height + .08, z);
+  }
+
+  function createStarFrame(anchor, angle) {
+    const normal = sampleSand(anchor.x, anchor.z).normal.clone();
+    const xAxis = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+    xAxis.addScaledVector(normal, -xAxis.dot(normal));
+    if (xAxis.lengthSq() < 1e-5) xAxis.set(1, 0, 0).addScaledVector(normal, -normal.x);
+    xAxis.normalize();
+    return { normal, xAxis, yAxis: new THREE.Vector3().crossVectors(normal, xAxis).normalize() };
+  }
+
+  function createSettledStarGeometry(anchor, frame, width, height) {
+    const settled = starGeometry.clone();
+    const positions = settled.getAttribute('position');
+    for (let i = 0; i < positions.count; i++) {
+      const localX = positions.getX(i) * width;
+      const localY = positions.getY(i) * height;
+      const worldX = anchor.x + localX * frame.xAxis.x + localY * frame.yAxis.x;
+      const worldZ = anchor.z + localX * frame.xAxis.z + localY * frame.yAxis.z;
+      const sandY = sampleSand(worldX, worldZ).height + STAR_SAND_CLEARANCE;
+      const localZ = (sandY - anchor.y - localX * frame.xAxis.y - localY * frame.yAxis.y) / frame.normal.y;
+      positions.setZ(i, localZ);
+    }
+    positions.needsUpdate = true;
+    settled.computeVertexNormals();
+    return settled;
   }
 
   function splashAt(origin, seed, startTime) {
@@ -323,6 +362,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
     root.remove(creature.group);
     creature.texture.dispose();
     for (const material of creature.materials) material.dispose();
+    creature.geometry?.dispose();
     creatures.delete(key);
   }
 
@@ -342,13 +382,16 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       const aspect = Math.max(.2, (texture.image?.naturalWidth || texture.image?.width || 1) / (texture.image?.naturalHeight || texture.image?.height || 1));
       const width = config.width * THREE.MathUtils.lerp(.86, 1.14, randomAt(seed, 1));
       const height = width / aspect;
+      const starAngle = randomAt(seed, 75) * TAU;
+      const anchor = config.swimStyle === 'star' ? findStarAnchor(seed, Math.max(width, height) * 1.15) : null;
+      const starFrame = config.swimStyle === 'star' ? createStarFrame(anchor, starAngle) : null;
       const front = configureMaterial(texture, config, THREE.FrontSide, 0xffffff);
       const back = configureMaterial(texture, config, THREE.BackSide,
         config.swimStyle === 'ray' ? 0xffffff : 0xe8f2f5);
       const group = new THREE.Group();
       group.name = `Fish • ${entry.species} • ${entry.id}`;
       const meshGeometry = config.swimStyle === 'ray' ? rayGeometry
-        : config.swimStyle === 'star' ? starGeometry : geometry;
+        : config.swimStyle === 'star' ? createSettledStarGeometry(anchor, starFrame, width, height) : geometry;
       const frontMesh = new THREE.Mesh(meshGeometry, front), backMesh = new THREE.Mesh(meshGeometry, back);
       frontMesh.position.z = .018;
       backMesh.position.z = -.018;
@@ -360,8 +403,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
 
       const creature = {
         ...entry, group, texture, materials: [front, back], seed, config,
-        anchor: config.swimStyle === 'star' ? findStarAnchor(seed) : null,
-        starAngle: randomAt(seed, 75) * TAU,
+        geometry: config.swimStyle === 'star' ? meshGeometry : null,
+        anchor, starFrame,
         radius: range(config.radiusRange, randomAt(seed, 2)),
         radiusRatio: THREE.MathUtils.lerp(.82, 1.16, randomAt(seed, 3)),
         height: range(config.heightRange, randomAt(seed, 4)),
@@ -385,7 +428,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
         verticalVelocity: 0,
         entrance: null,
       };
-      if (entering && config.swimStyle !== 'star') {
+      if (entering) {
         camera.updateMatrixWorld();
         const forward = new THREE.Vector3();
         camera.getWorldDirection(forward);
@@ -406,7 +449,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
           startTime: performance.now() / 1000,
           start, impact,
           impactVelocity: impact.clone().sub(start).multiplyScalar(2 / DROP_SECONDS),
-          fallQuaternion: camera.quaternion.clone().multiply(
+          // A new starfish arrives square-on to the viewer, then turns down onto its fitted sand frame.
+          fallQuaternion: config.swimStyle === 'star' ? camera.quaternion.clone() : camera.quaternion.clone().multiply(
             new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2)),
           splashed: false,
         };
@@ -451,7 +495,6 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
   function route(creature, orbitTime, target, advance = 0) {
     if (creature.config.swimStyle === 'star') {
       target.copy(creature.anchor);
-      target.y = sandHeight(target.x, target.z) + .12;
       return target;
     }
     const t = routeAngle(creature, orbitTime + advance);
@@ -464,7 +507,9 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
     const y = creature.config.swimStyle === 'ray'
       ? sandHeight(x, z) + 3.0 + creature.height * .25 + depthWander * .25
       : creature.height + depthWander;
-    target.set(x, THREE.MathUtils.clamp(y, creature.config.swimStyle === 'ray' ? 0 : .65, 15.2), z);
+    const minHeight = creature.config.swimStyle === 'ray' || creature.config.swimStyle === 'star'
+      ? 0 : creature.config.minHeight;
+    target.set(x, THREE.MathUtils.clamp(y, minHeight, 15.2), z);
     return target;
   }
 
@@ -480,12 +525,9 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       creature.verticalVelocity = (ahead.y - position.y) / .3;
       travel.subVectors(ahead, position).normalize();
       if (creature.config.swimStyle === 'star') {
-        xAxis.set(Math.cos(creature.starAngle), 0, Math.sin(creature.starAngle));
-        // A small viewer-facing tilt keeps the starfish readable while it remains settled on the sand.
-        zAxis.set(camera.position.x - position.x, 0, camera.position.z - position.z);
-        zAxis.addScaledVector(xAxis, -zAxis.dot(xAxis)).normalize();
-        zAxis.multiplyScalar(.32).add(worldUp).normalize();
-        yAxis.crossVectors(zAxis, xAxis).normalize();
+        xAxis.copy(creature.starFrame.xAxis);
+        yAxis.copy(creature.starFrame.yAxis);
+        zAxis.copy(creature.starFrame.normal);
       } else if (creature.config.swimStyle === 'ray') {
         xAxis.set(travel.x, 0, travel.z).normalize()
           .multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);
@@ -528,8 +570,9 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
             * Math.sin(BOUNCE_FREQUENCY * sinceImpact) / BOUNCE_FREQUENCY;
           creature.group.position.addScaledVector(entrance.impactVelocity, bounce);
           const swimOrientation = creature.group.quaternion.clone();
+          const rotationBlend = creature.config.swimStyle === 'star' ? smoothstep(swim) : swimBlend;
           creature.group.quaternion.copy(entrance.fallQuaternion)
-            .slerp(swimOrientation, swimBlend);
+            .slerp(swimOrientation, rotationBlend);
           if (swim >= 1) creature.entrance = null;
         }
       } else {
