@@ -182,7 +182,7 @@ function configureMaterial(texture, config, side, tint) {
  * `urlOf(entry)` decide de dónde sale la imagen (Supabase o la carpeta de demo).
  * `sync(rows)` recibe las filas del acuario en vez del manifiesto de archivos que usa él.
  */
-export function createCreatureSystem({ scene, camera, textureLoader, urlOf, terrainHeight = () => 0, sandHeight = () => 0 }) {
+export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sandHeight = () => 0 }) {
   const root = new THREE.Group();
   root.name = 'Animated sea creatures';
   scene.add(root);
@@ -338,9 +338,9 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, terr
           { frequency: THREE.MathUtils.lerp(1., 1.5, randomAt(seed, 15)), amplitude: .15, phase: randomAt(seed, 16) * TAU },
         ],
         verticalWaves: [
-          { frequency: THREE.MathUtils.lerp(.028, .052, randomAt(seed, 17)), amplitude: THREE.MathUtils.lerp(.85, 1.35, randomAt(seed, 18)), phase: randomAt(seed, 19) * TAU },
-          { frequency: THREE.MathUtils.lerp(.085, .14, randomAt(seed, 20)), amplitude: THREE.MathUtils.lerp(.34, .62, randomAt(seed, 21)), phase: randomAt(seed, 22) * TAU },
-          { frequency: THREE.MathUtils.lerp(.21, .36, randomAt(seed, 23)), amplitude: THREE.MathUtils.lerp(.1, .24, randomAt(seed, 24)), phase: randomAt(seed, 25) * TAU },
+          { frequency: THREE.MathUtils.lerp(.04, .075, randomAt(seed, 17)), amplitude: THREE.MathUtils.lerp(1.0, 1.55, randomAt(seed, 18)), phase: randomAt(seed, 19) * TAU },
+          { frequency: THREE.MathUtils.lerp(.12, .2, randomAt(seed, 20)), amplitude: THREE.MathUtils.lerp(.42, .76, randomAt(seed, 21)), phase: randomAt(seed, 22) * TAU },
+          { frequency: THREE.MathUtils.lerp(.3, .48, randomAt(seed, 23)), amplitude: THREE.MathUtils.lerp(.14, .3, randomAt(seed, 24)), phase: randomAt(seed, 25) * TAU },
         ],
         speedFactor: 1,
         verticalVelocity: 0,
@@ -419,7 +419,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, terr
     const z = center.z + Math.sin(t) * radial * creature.radiusRatio;
     const y = creature.config.swimStyle === 'ray'
       ? sandHeight(x, z) + 5.2 + creature.height * .25 + depthWander * .25
-      : Math.max(Math.max(0, terrainHeight(x, z)) + Math.max(.65, creature.group.scale.y * .45), creature.height + depthWander);
+      : creature.height + depthWander;
     target.set(x, THREE.MathUtils.clamp(y, 0, 15.2), z);
     return target;
   }

@@ -53,7 +53,6 @@ updateFpsIndicator();
 const creatures = createCreatureSystem({
   scene: reef.scene,
   camera: reef.camera,
-  terrainHeight: reef.terrainHeight,
   sandHeight: reef.sandHeight,
   textureLoader: new THREE.TextureLoader(),
   urlOf: (entry) => entry.previewUrl || (DEMO ? `aquarium/demo/${entry.filename}` : publicUrl(entry.filename)),

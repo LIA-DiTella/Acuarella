@@ -19,36 +19,6 @@ const CAMERA_Y = 3.8;
 const DRAG_SENSITIVITY = .0035;
 const CAMERA_SMOOTHING = .05;      // segundos; independiente de la tasa de cuadros
 
-/**
- * El mismo mapa de alturas cenital que usa el shader, pero leído en CPU: dice a qué altura llega el coral en
- * cada punto del arrecife. Con eso los peces pueden trepar los montículos y colarse por los canales.
- * Igual que en el shader: altura = rojo · 40 − 8, con uv = (x, −z) / 96 + 0,5.
- */
-async function loadHeightfield(url) {
-  const img = await new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`No se pudo cargar ${url}`));
-    image.src = url;
-  });
-  const canvas = document.createElement('canvas');
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
-  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  return (x, z) => {
-    const px = Math.min(width - 1, Math.max(0, (x / 96 + .5) * width - .5));
-    const py = Math.min(height - 1, Math.max(0, (-z / 96 + .5) * height - .5));
-    const x0 = Math.floor(px), y0 = Math.floor(py);
-    const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0 + 1);
-    const red = (cx, cy) => data[(cy * width + cx) * 4];
-    const top = THREE.MathUtils.lerp(red(x0, y0), red(x1, y0), px - x0);
-    const bottom = THREE.MathUtils.lerp(red(x0, y1), red(x1, y1), px - x0);
-    return THREE.MathUtils.lerp(top, bottom, py - y0) / 255 * 40 - 8;
-  };
-}
-
 // Index the sand triangles once so a creature can follow the basin without reading coral heights.
 function createSandHeight(mesh) {
   const position = mesh.geometry.getAttribute('position');
@@ -149,8 +119,6 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 
     camera.rotation.set(pitch, yaw, 0, 'YXZ');
     lastInteraction = performance.now();
   }
-
-  const terrainHeight = await loadHeightfield(`${ASSETS}overhead.png`);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -445,9 +413,8 @@ float waterCaustic(vec2 p) {
   let time = 0;
   return {
     scene, camera, renderer, shared, setQuality, resetView, applyWater,
-    root: gltf.scene,  // geometría del arrecife: el acuario la usa para saber si un coral tapa a un pez
+    root: gltf.scene,
     get quality() { return quality; },
-    terrainHeight,  // altura del coral en (x, z): la usan los peces para no meterse dentro de la roca
     sandHeight,
     get yaw() { return yaw; },
     /** Avanza el ciclo del agua, mueve el paneo y dibuja. Los peces se agregan a `scene` desde el acuario. */
