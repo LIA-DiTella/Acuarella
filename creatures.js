@@ -17,7 +17,7 @@ function smoothstep(value) {
 
 const DEFAULT_SPECIES = {
   width: 2.7,
-  heightRange: [0, 11.5],
+  heightRange: [1.1, 11.5],
   radiusRange: [12, 22],
   orbitSecondsRange: [85, 135],
   schooling: .25,
@@ -34,7 +34,7 @@ const DEFAULT_SPECIES = {
 const SPECIES = {
   pirana: {
     width: 3.2,
-    heightRange: [0, 11.8],
+    heightRange: [1.1, 11.8],
     radiusRange: [12, 21],
     orbitSecondsRange: [68, 98],
     schooling: .45,
@@ -49,7 +49,7 @@ const SPECIES = {
   },
   tiburon: {
     width: 6.4,
-    heightRange: [0, 12.5],
+    heightRange: [1.1, 12.5],
     radiusRange: [16, 24],
     orbitSecondsRange: [120, 170],
     bodyWaveAmplitude: .085,
@@ -61,7 +61,7 @@ const SPECIES = {
   },
   bonito: {
     width: 4.3,
-    heightRange: [0, 11.5],
+    heightRange: [1.1, 11.5],
     radiusRange: [13, 22],
     orbitSecondsRange: [62, 92],
     schooling: .5,
@@ -73,7 +73,7 @@ const SPECIES = {
   },
   piloto: {
     width: 3.4,
-    heightRange: [0, 10.8],
+    heightRange: [1.1, 10.8],
     radiusRange: [12, 20],
     orbitSecondsRange: [70, 100],
     schooling: .55,
@@ -85,7 +85,7 @@ const SPECIES = {
   },
   pulpo: {
     width: 4.2,
-    heightRange: [0, 9.5],
+    heightRange: [1.1, 9.5],
     radiusRange: [11, 18],
     orbitSecondsRange: [130, 180],
     bodyWaveAmplitude: .14,
@@ -109,7 +109,7 @@ const SPECIES = {
   },
   estrella: {
     width: 2.4,
-    heightRange: [0, 7.5],
+    heightRange: [1.1, 7.5],
     radiusRange: [10, 17],
     orbitSecondsRange: [200, 260],
     bodyWaveAmplitude: .03,
@@ -308,7 +308,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       const width = config.width * THREE.MathUtils.lerp(.86, 1.14, randomAt(seed, 1));
       const height = width / aspect;
       const front = configureMaterial(texture, config, THREE.FrontSide, 0xffffff);
-      const back = configureMaterial(texture, config, THREE.BackSide, 0xe8f2f5);
+      const back = configureMaterial(texture, config, THREE.BackSide,
+        config.swimStyle === 'ray' ? 0xffffff : 0xe8f2f5);
       const group = new THREE.Group();
       group.name = `Fish • ${entry.species} • ${entry.id}`;
       const meshGeometry = config.swimStyle === 'ray' ? rayGeometry : geometry;
@@ -418,9 +419,9 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
     const x = center.x + Math.cos(t) * radial;
     const z = center.z + Math.sin(t) * radial * creature.radiusRatio;
     const y = creature.config.swimStyle === 'ray'
-      ? sandHeight(x, z) + 5.2 + creature.height * .25 + depthWander * .25
+      ? sandHeight(x, z) + 3.0 + creature.height * .25 + depthWander * .25
       : creature.height + depthWander;
-    target.set(x, THREE.MathUtils.clamp(y, 0, 15.2), z);
+    target.set(x, THREE.MathUtils.clamp(y, creature.config.swimStyle === 'ray' ? 0 : .65, 15.2), z);
     return target;
   }
 
@@ -437,10 +438,10 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       if (creature.config.swimStyle === 'ray') {
         xAxis.set(travel.x, 0, travel.z).normalize()
           .multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);
-        // Keep the disc level along its path, but lean its back gently toward the viewer.
+        // Lean the disc toward the viewer so both its top and underside stay readable.
         zAxis.set(camera.position.x - position.x, 0, camera.position.z - position.z);
         zAxis.addScaledVector(xAxis, -zAxis.dot(xAxis)).normalize();
-        zAxis.multiplyScalar(.42).add(worldUp).normalize();
+        zAxis.multiplyScalar(.72).add(worldUp).normalize();
         yAxis.crossVectors(zAxis, xAxis).normalize();
       } else {
         xAxis.copy(travel).multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);

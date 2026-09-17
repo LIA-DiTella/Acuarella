@@ -131,7 +131,7 @@ function frame(now) {
   reef.render(Math.min(.25, elapsed));
   if (creatures.count !== displayedCreatureCount) {
     displayedCreatureCount = creatures.count;
-    creatureCounter.textContent = `Criaturas: ${displayedCreatureCount}`;
+    creatureCounter.textContent = `🐟 ${displayedCreatureCount}`;
   }
 
   frames++;
