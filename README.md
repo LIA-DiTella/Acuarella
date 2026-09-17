@@ -23,13 +23,14 @@ El escáner busca el borde grueso impreso cerca del contorno esperado. Corrige p
 
 El fondo es el arrecife 3D de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)), con su paneo lateral lento: una vuelta completa cada 120 segundos. Los peces escaneados nadan alrededor de la cámara como planos que ondulan, así que se ven en 3D aunque sean dibujos, y hay peces en los 360°: siempre hay hacia donde el paneo esté mirando.
 
-El movimiento de los escaneos es el sistema de criaturas de Martín, portado tal cual en `creatures.js`: cada pez recorre una órbita alrededor del espectador, con ondas de velocidad que le dan ese ritmo de planear y acelerar, cabeceo vertical, alabeo al doblar y aleteo cuya frecuencia sigue el avance real. Como orbitan alrededor de la cámara, siempre se los ve de costado.
+El movimiento de los escaneos parte del sistema de criaturas de Martín en `creatures.js`: cada pez recorre una órbita alrededor del espectador, con ondas de velocidad que le dan ese ritmo de planear y acelerar, cabeceo vertical, alabeo al doblar y aleteo cuya frecuencia sigue el avance real. La raya planea sobre la altura de la arena, sin seguir las formas del coral, con el disco ligeramente inclinado hacia la cámara y ondulación de todo el cuerpo.
 
-Cada especie ajusta ancho, altura, radio y ritmo en la tabla `SPECIES` de `creatures.js`: el tiburón es grande y lento, la raya lleva el cuerpo casi todo flexible para ondular el disco, el pulpo va lento y la estrella casi no se mueve.
+Cada especie ajusta ancho, altura, radio y ritmo en la tabla `SPECIES` de `creatures.js`: todas pueden bajar hasta una altura base de 0 y se mantienen por encima del relieve. El tiburón es grande y lento, el pulpo va lento y la estrella casi no se mueve.
 
-**Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar. **F1** restablece la vista y **F2** alterna entre gráficos Eco y Ultra. El indicador de FPS y calidad aparece en la esquina superior derecha.
+**Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar. **F1** restablece la vista, **F2** alterna entre gráficos Eco y Ultra y **F3** agrega una piraña roja de prueba con la animación de entrada. Cada pulsación agrega otra; desaparecen al recargar la página. El contador de criaturas está arriba a la izquierda y el indicador de FPS y calidad, arriba a la derecha.
 
 Muestra los peces fijos (`permanent`) y los visitantes activos.
+Los peces que llegan después de abrir el acuario caen desde la parte superior, producen un pequeño remolino de burbujas y nadan hasta incorporarse a su órbita.
 
 - **Escaneos nuevos:** entran al instante.
 - **Rotación:** cada 2 h rotan algunos visitantes.

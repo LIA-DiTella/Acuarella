@@ -16,9 +16,15 @@
   #loading .bar { width: min(280px, 70vw); height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .2); overflow: hidden; }
   #loading .bar i { display: block; height: 100%; width: 0; background: #29f0ff; transition: width .2s linear; }
   #debug {
-    position: fixed; left: 12px; top: 12px; max-width: calc(100% - 24px); max-height: 80vh; overflow: auto;
+    position: fixed; left: calc(env(safe-area-inset-left, 0px) + 12px); top: calc(env(safe-area-inset-top, 0px) + 44px);
+    max-width: calc(100% - 24px); max-height: calc(80vh - 32px); overflow: auto;
     margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(0, 20, 40, .6); color: #e8f7fb;
     font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre;
+  }
+  #creature-count {
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); left: calc(env(safe-area-inset-left, 0px) + 12px);
+    padding: 4px 7px; border-radius: 5px; background: rgba(0, 20, 40, .6); color: #e8f7fb;
+    font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none;
   }
   #fps {
     position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); right: calc(env(safe-area-inset-right, 0px) + 12px);
@@ -34,6 +40,7 @@
 <body>
 <canvas id="sea"></canvas>
 <div id="loading">Cargando el arrecife…<div class="bar"><i id="progress"></i></div></div>
+<div id="creature-count" aria-label="Cantidad de criaturas">Criaturas: 0</div>
 <div id="fps" aria-label="Cuadros por segundo y calidad gráfica"></div>
 <pre id="debug" hidden></pre>
 <script type="module" src="aquarium.js"></script>

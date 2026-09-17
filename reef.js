@@ -14,8 +14,8 @@ const ASSETS = 'reef/';
 const PERIOD = 25;                 // segundos del ciclo de cáusticas y plantas
 const TAU = Math.PI * 2;
 const PAN_SECONDS = 120;           // una vuelta completa, igual que el paneo del proyecto de Martín
-const PITCH = -.12;                // un poco más alta y mirando hacia abajo: el encuadre queda más alejado
-const CAMERA_Y = 3.2;
+const PITCH = -.05;                // casi al horizonte para mostrar más agua sobre el arrecife
+const CAMERA_Y = 3.8;
 const DRAG_SENSITIVITY = .0035;
 const CAMERA_SMOOTHING = .05;      // segundos; independiente de la tasa de cuadros
 
@@ -38,9 +38,53 @@ async function loadHeightfield(url) {
   ctx.drawImage(img, 0, 0);
   const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
   return (x, z) => {
-    const px = Math.min(width - 1, Math.max(0, Math.round((x / 96 + .5) * width)));
-    const py = Math.min(height - 1, Math.max(0, Math.round((-z / 96 + .5) * height)));
-    return data[(py * width + px) * 4] / 255 * 40 - 8;
+    const px = Math.min(width - 1, Math.max(0, (x / 96 + .5) * width - .5));
+    const py = Math.min(height - 1, Math.max(0, (-z / 96 + .5) * height - .5));
+    const x0 = Math.floor(px), y0 = Math.floor(py);
+    const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0 + 1);
+    const red = (cx, cy) => data[(cy * width + cx) * 4];
+    const top = THREE.MathUtils.lerp(red(x0, y0), red(x1, y0), px - x0);
+    const bottom = THREE.MathUtils.lerp(red(x0, y1), red(x1, y1), px - x0);
+    return THREE.MathUtils.lerp(top, bottom, py - y0) / 255 * 40 - 8;
+  };
+}
+
+// Index the sand triangles once so a creature can follow the basin without reading coral heights.
+function createSandHeight(mesh) {
+  const position = mesh.geometry.getAttribute('position');
+  const indices = mesh.geometry.index;
+  const vertices = Array.from({ length: position.count }, (_, i) =>
+    new THREE.Vector3(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld));
+  const cells = new Map();
+  const cellSize = 2;
+  for (let i = 0; i < indices.count; i += 3) {
+    const a = vertices[indices.getX(i)], b = vertices[indices.getX(i + 1)], c = vertices[indices.getX(i + 2)];
+    const triangle = [a, b, c];
+    const x0 = Math.floor(Math.min(a.x, b.x, c.x) / cellSize);
+    const x1 = Math.floor(Math.max(a.x, b.x, c.x) / cellSize);
+    const z0 = Math.floor(Math.min(a.z, b.z, c.z) / cellSize);
+    const z1 = Math.floor(Math.max(a.z, b.z, c.z) / cellSize);
+    for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) {
+      const key = `${gx},${gz}`;
+      if (!cells.has(key)) cells.set(key, []);
+      cells.get(key).push(triangle);
+    }
+  }
+  return (x, z) => {
+    const candidates = cells.get(`${Math.floor(x / cellSize)},${Math.floor(z / cellSize)}`) || [];
+    let height = -Infinity;
+    for (const [a, b, c] of candidates) {
+      const dx1 = b.x - a.x, dz1 = b.z - a.z;
+      const dx2 = c.x - a.x, dz2 = c.z - a.z;
+      const determinant = dx1 * dz2 - dx2 * dz1;
+      if (Math.abs(determinant) < 1e-8) continue;
+      const px = x - a.x, pz = z - a.z;
+      const u = (px * dz2 - dx2 * pz) / determinant;
+      const v = (dx1 * pz - px * dz1) / determinant;
+      if (u < -1e-5 || v < -1e-5 || u + v > 1.00001) continue;
+      height = Math.max(height, a.y + u * (b.y - a.y) + v * (c.y - a.y));
+    }
+    return Number.isFinite(height) ? height : 0;
   };
 }
 const QUALITY = {
@@ -73,8 +117,8 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 
   scene.background = new THREE.Color('#087cb4');
   scene.fog = new THREE.FogExp2('#086aab', .028);
 
-  // Cámara en el mismo punto que en el proyecto de Martín (2,35 m sobre el fondo), con su paneo lateral lento.
-  const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .12, 170);
+  // Cámara elevada con un poco más de cielo, manteniendo el paneo lateral lento.
+  const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, .12, 170);
   camera.position.set(0, CAMERA_Y, 0);
   camera.rotation.order = 'YXZ';
   camera.rotation.set(PITCH, 0, 0, 'YXZ');
@@ -347,6 +391,9 @@ float waterCaustic(vec2 p) {
     for (const m of materials) if (!mats.has(m)) { mats.add(m); waterMaterial(m); }
   });
   scene.updateMatrixWorld(true);
+  const sandMesh = renderables.filter((o) => [].concat(o.material).some((m) => /PBR • sand •/.test(m.name)))
+    .sort((a, b) => b.geometry.getAttribute('position').count - a.geometry.getAttribute('position').count)[0];
+  const sandHeight = createSandHeight(sandMesh);
   const box = new THREE.Box3();
   for (const o of renderables) {
     box.setFromObject(o);
@@ -356,7 +403,7 @@ float waterCaustic(vec2 p) {
   function resize() {
     const w = innerWidth, h = innerHeight;
     camera.aspect = w / h;
-    camera.fov = w < 700 ? 70 : 62;
+    camera.fov = w < 700 ? 76 : 68;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
     composer.setPixelRatio(renderer.getPixelRatio());
@@ -401,6 +448,7 @@ float waterCaustic(vec2 p) {
     root: gltf.scene,  // geometría del arrecife: el acuario la usa para saber si un coral tapa a un pez
     get quality() { return quality; },
     terrainHeight,  // altura del coral en (x, z): la usan los peces para no meterse dentro de la roca
+    sandHeight,
     get yaw() { return yaw; },
     /** Avanza el ciclo del agua, mueve el paneo y dibuja. Los peces se agregan a `scene` desde el acuario. */
     render(dt) {

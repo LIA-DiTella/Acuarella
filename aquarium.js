@@ -30,6 +30,7 @@ const loading = document.getElementById('loading');
 const progress = document.getElementById('progress');
 const canvas = document.getElementById('sea');
 const fpsIndicator = document.getElementById('fps');
+const creatureCounter = document.getElementById('creature-count');
 
 let reef;
 try {
@@ -49,6 +50,38 @@ function updateFpsIndicator() {
 }
 updateFpsIndicator();
 
+const creatures = createCreatureSystem({
+  scene: reef.scene,
+  camera: reef.camera,
+  terrainHeight: reef.terrainHeight,
+  sandHeight: reef.sandHeight,
+  textureLoader: new THREE.TextureLoader(),
+  urlOf: (entry) => entry.previewUrl || (DEMO ? `aquarium/demo/${entry.filename}` : publicUrl(entry.filename)),
+});
+let sourceRows = [];
+const testRows = [];
+
+function applyRows() {
+  const rows = [...sourceRows, ...testRows];
+  // El sistema de criaturas rehace un pez cuando le cambia la versión; el nombre del archivo alcanza.
+  creatures.sync(rows.map((row) => ({ ...row, version: row.filename })));
+  status.rows = rows;
+}
+
+async function sync() {
+  try {
+    sourceRows = DEMO ? demoRows() : await fetchAquarium();
+    applyRows();
+    Object.assign(status, { error: null, lastSync: Date.now() });
+  } catch (err) {
+    status.error = err.message;
+    if (!status.lastSync) applyRows();
+  }
+}
+
+await sync();
+setInterval(sync, POLL_MS);
+
 addEventListener('keydown', (event) => {
   if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
   if (event.key === 'F1') {
@@ -58,29 +91,16 @@ addEventListener('keydown', (event) => {
     event.preventDefault();
     reef.setQuality(reef.quality === 'eco' ? 'ultra' : 'eco');
     updateFpsIndicator();
+  } else if (event.key === 'F3') {
+    event.preventDefault();
+    const number = testRows.length + 1;
+    testRows.push({
+      id: `f3-${number}`, species: 'pirana', filename: 'pirana-1.png',
+      previewUrl: 'aquarium/demo/pirana-1.png', permanent: false,
+    });
+    applyRows();
   }
 });
-
-const creatures = createCreatureSystem({
-  scene: reef.scene,
-  camera: reef.camera,
-  textureLoader: new THREE.TextureLoader(),
-  urlOf: (entry) => (DEMO ? `aquarium/demo/${entry.filename}` : publicUrl(entry.filename)),
-});
-
-async function sync() {
-  try {
-    const rows = DEMO ? demoRows() : await fetchAquarium();
-    // El sistema de criaturas rehace un pez cuando le cambia la versión; el nombre del archivo alcanza.
-    creatures.sync(rows.map((row) => ({ ...row, version: row.filename })));
-    Object.assign(status, { rows, error: null, lastSync: Date.now() });
-  } catch (err) {
-    status.error = err.message;
-  }
-}
-
-await sync();
-setInterval(sync, POLL_MS);
 
 function drawDebug(now) {
   const permanent = status.rows.filter((r) => r.permanent).length;
@@ -100,6 +120,7 @@ function drawDebug(now) {
 }
 
 let last = performance.now(), frames = 0, fpsStart = last, orbitTime = 0;
+let displayedCreatureCount = -1;
 function frame(now) {
   requestAnimationFrame(frame);
   const elapsed = Math.max(0, (now - last) / 1000);
@@ -109,6 +130,10 @@ function frame(now) {
   orbitTime += dt * SPEED;
   creatures.update(orbitTime, now / 1000, reef.shared.uMotionScale.value);
   reef.render(Math.min(.25, elapsed));
+  if (creatures.count !== displayedCreatureCount) {
+    displayedCreatureCount = creatures.count;
+    creatureCounter.textContent = `Criaturas: ${displayedCreatureCount}`;
+  }
 
   frames++;
   if (now - fpsStart > 1000) {

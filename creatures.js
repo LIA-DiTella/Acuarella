@@ -1,15 +1,23 @@
-// Criaturas del acuario: puerto fiel de web/src/creatures.js del proyecto de Martín
-// (github.com/LIA-DiTella/ditella-day). Se mantiene su lógica tal cual —órbitas alrededor de la cámara, ondas de
-// velocidad, cabeceo vertical, alabeo y fase de cola por avance de ruta—; lo único propio es de dónde salen las
-// imágenes (Supabase o la demo) y la tabla de especies, que suma pulpo, raya y estrella.
+// Criaturas del acuario: órbitas y nado portados de web/src/creatures.js del proyecto de Martín
+// (github.com/LIA-DiTella/ditella-day), con una entrada animada para los peces que llegan después de cargar.
 
 import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
+const DROP_SECONDS = 1.05;
+const SWIM_IN_SECONDS = 2.5;
+const SPLASH_SECONDS = 2.1;
+const BOUNCE_FREQUENCY = 7.5;
+const BOUNCE_DAMPING = 3;
+
+function smoothstep(value) {
+  const t = THREE.MathUtils.clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
 
 const DEFAULT_SPECIES = {
   width: 2.7,
-  heightRange: [6.5, 11.5],
+  heightRange: [0, 11.5],
   radiusRange: [12, 22],
   orbitSecondsRange: [85, 135],
   schooling: .25,
@@ -26,7 +34,7 @@ const DEFAULT_SPECIES = {
 const SPECIES = {
   pirana: {
     width: 3.2,
-    heightRange: [6.8, 11.8],
+    heightRange: [0, 11.8],
     radiusRange: [12, 21],
     orbitSecondsRange: [68, 98],
     schooling: .45,
@@ -41,7 +49,7 @@ const SPECIES = {
   },
   tiburon: {
     width: 6.4,
-    heightRange: [7.5, 12.5],
+    heightRange: [0, 12.5],
     radiusRange: [16, 24],
     orbitSecondsRange: [120, 170],
     bodyWaveAmplitude: .085,
@@ -53,7 +61,7 @@ const SPECIES = {
   },
   bonito: {
     width: 4.3,
-    heightRange: [6.5, 11.5],
+    heightRange: [0, 11.5],
     radiusRange: [13, 22],
     orbitSecondsRange: [62, 92],
     schooling: .5,
@@ -65,7 +73,7 @@ const SPECIES = {
   },
   piloto: {
     width: 3.4,
-    heightRange: [6.2, 10.8],
+    heightRange: [0, 10.8],
     radiusRange: [12, 20],
     orbitSecondsRange: [70, 100],
     schooling: .55,
@@ -77,7 +85,7 @@ const SPECIES = {
   },
   pulpo: {
     width: 4.2,
-    heightRange: [5.5, 9.5],
+    heightRange: [0, 9.5],
     radiusRange: [11, 18],
     orbitSecondsRange: [130, 180],
     bodyWaveAmplitude: .14,
@@ -89,20 +97,19 @@ const SPECIES = {
   },
   raya: {
     width: 4.8,
-    heightRange: [5, 9],
-    radiusRange: [12, 20],
+    heightRange: [0, 1.2],
+    radiusRange: [10, 16],
     orbitSecondsRange: [105, 150],
-    // Cuerpo casi todo flexible: la onda recorre el disco, como nada una raya.
-    bodyWaveAmplitude: .2,
-    tailAmplitude: .3,
-    tailFrequency: .7,
-    bodyStiffness: .18,
-    bankingStrength: .1,
-    verticalDrift: 1.3,
+    swimStyle: 'ray',
+    bodyWaveAmplitude: .36,
+    tailAmplitude: .07,
+    tailFrequency: .58,
+    bankingStrength: .06,
+    verticalDrift: .12,
   },
   estrella: {
     width: 2.4,
-    heightRange: [4.5, 7.5],
+    heightRange: [0, 7.5],
     radiusRange: [10, 17],
     orbitSecondsRange: [200, 260],
     bodyWaveAmplitude: .03,
@@ -142,7 +149,16 @@ function configureMaterial(texture, config, side, tint) {
     shader.uniforms.uFishTurn = uniforms.turn;
     shader.uniforms.uFishSpeed = uniforms.speed;
     shader.vertexShader = `uniform float uFishPhase; uniform float uFishMotion; uniform float uFishTurn; uniform float uFishSpeed;\n${shader.vertexShader}`;
-    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    const deformation = config.swimStyle === 'ray' ? `
+      float wing=pow(abs(uv.y-.5)*2.0,1.15);
+      float stroke=sin(uFishPhase*1.15-uv.x*2.3+wing*1.6);
+      float bodyLift=sin(uFishPhase*.8-uv.x*1.8)*.10;
+      transformed.z+=(bodyLift+stroke*wing*${config.bodyWaveAmplitude.toFixed(4)})*uFishMotion;
+      transformed.y+=wing*sin(uFishPhase*1.15-uv.x*2.3+wing*1.6+.7)*.03*uFishMotion;
+      float tail=smoothstep(.63,.97,uv.x);
+      transformed.y+=sin(uFishPhase*1.6-uv.x*5.0)*tail*.025*uFishMotion;
+      transformed.z+=sin(uFishPhase*1.5-uv.x*4.0)*tail*${config.tailAmplitude.toFixed(4)}*uFishMotion;`
+      : `
       float tailCoord=${tailIsRight ? 'uv.x' : '1.0-uv.x'};
       float flexible=smoothstep(${config.bodyStiffness.toFixed(4)},1.0,tailCoord);
       float bodyFlex=smoothstep(.055,.78,tailCoord);
@@ -154,9 +170,10 @@ function configureMaterial(texture, config, side, tint) {
       transformed.z+=paperCurve+(bodyWave+tailBeat+steering)*uFishMotion;
       transformed.y+=cos(uFishPhase*.54-tailCoord*4.8)*.025*bodyFlex*uFishMotion;
       transformed.x+=sin(uFishPhase-tailCoord*6.0)*.025*flexible*uFishMotion;
-      transformed.y*=1.0-cos(uFishPhase*1.72)*.018*flexible*uFishMotion;`);
+      transformed.y*=1.0-cos(uFishPhase*1.72)*.018*flexible*uFishMotion;`;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${deformation}`);
   };
-  material.customProgramCacheKey = () => `paper-fish-v4-${side}-${config.tailSide}-${config.bodyWaveAmplitude}-${config.tailAmplitude}-${config.bodyStiffness}`;
+  material.customProgramCacheKey = () => `paper-fish-v5-${side}-${config.swimStyle || 'fish'}-${config.tailSide}-${config.bodyWaveAmplitude}-${config.tailAmplitude}-${config.bodyStiffness}`;
   material.userData.fishUniforms = uniforms;
   return material;
 }
@@ -165,13 +182,105 @@ function configureMaterial(texture, config, side, tint) {
  * `urlOf(entry)` decide de dónde sale la imagen (Supabase o la carpeta de demo).
  * `sync(rows)` recibe las filas del acuario en vez del manifiesto de archivos que usa él.
  */
-export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
+export function createCreatureSystem({ scene, camera, textureLoader, urlOf, terrainHeight = () => 0, sandHeight = () => 0 }) {
   const root = new THREE.Group();
   root.name = 'Animated sea creatures';
   scene.add(root);
   const geometry = new THREE.PlaneGeometry(1, 1, 48, 6);
+  const rayGeometry = new THREE.PlaneGeometry(1, 1, 48, 24);
   const creatures = new Map(), pending = new Map();
   const center = camera.position.clone();
+  const splashes = [];
+  let hasSynced = false, lastOrbitTime = 0;
+
+  function splashAt(origin, seed, startTime) {
+    const group = new THREE.Group();
+    group.position.copy(origin);
+    root.add(group);
+    const rings = [.0, .13].map((delay, index) => {
+      const material = new THREE.MeshBasicMaterial({
+        color: index ? 0x62dfff : 0xe8ffff, transparent: true, opacity: 0,
+        depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(new THREE.RingGeometry(.72, .92, 40), material);
+      mesh.quaternion.copy(camera.quaternion);
+      group.add(mesh);
+      return { mesh, delay };
+    });
+
+    const particles = Array.from({ length: 28 }, (_, i) => ({
+      angle: randomAt(seed, 40 + i) * TAU,
+      delay: i < 10 ? 0 : randomAt(seed, 70 + i) * .28,
+      speed: THREE.MathUtils.lerp(1.5, 3.6, randomAt(seed, 100 + i)),
+      radius: randomAt(seed, 130 + i) * .48,
+      size: THREE.MathUtils.lerp(.16, .36, randomAt(seed, 160 + i)),
+      spray: i < 10,
+    }));
+    const positions = new Float32Array(particles.length * 3);
+    const alphas = new Float32Array(particles.length);
+    const sizes = new Float32Array(particles.map((particle) => particle.size));
+    const bubbleGeometry = new THREE.BufferGeometry();
+    bubbleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    bubbleGeometry.setAttribute('aAlpha', new THREE.BufferAttribute(alphas, 1));
+    bubbleGeometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+    const bubbleMaterial = new THREE.ShaderMaterial({
+      uniforms: { uViewportHeight: { value: innerHeight * Math.min(devicePixelRatio, 2) } },
+      vertexShader: `attribute float aAlpha; attribute float aSize; uniform float uViewportHeight;
+        varying float vAlpha;
+        void main() { vAlpha=aAlpha; vec4 mv=modelViewMatrix*vec4(position,1.);
+          gl_PointSize=clamp(aSize*uViewportHeight/max(1.,-mv.z),2.,24.);
+          gl_Position=projectionMatrix*mv; }`,
+      fragmentShader: `varying float vAlpha;
+        void main() { vec2 p=gl_PointCoord*2.-1.; float r=length(p);
+          float rim=smoothstep(.5,.78,r)*(1.-smoothstep(.84,1.,r));
+          float glint=1.-smoothstep(.08,.32,length(gl_PointCoord-vec2(.33,.33)));
+          float alpha=(rim*.75+glint*.55+.1*(1.-r))*vAlpha*(1.-smoothstep(.94,1.,r));
+          gl_FragColor=vec4(.62,.93,1.,alpha); }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    group.add(new THREE.Points(bubbleGeometry, bubbleMaterial));
+    splashes.push({ group, rings, particles, positions, alphas, bubbleGeometry, bubbleMaterial,
+      right: new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion), startTime });
+  }
+
+  function updateSplashes(ambientTime) {
+    for (let i = splashes.length - 1; i >= 0; i--) {
+      const splash = splashes[i];
+      const age = ambientTime - splash.startTime;
+      if (age >= SPLASH_SECONDS) {
+        root.remove(splash.group);
+        for (const { mesh } of splash.rings) { mesh.geometry.dispose(); mesh.material.dispose(); }
+        splash.bubbleGeometry.dispose();
+        splash.bubbleMaterial.dispose();
+        splashes.splice(i, 1);
+        continue;
+      }
+      for (const { mesh, delay } of splash.rings) {
+        const t = (age - delay) / .82;
+        mesh.visible = t >= 0 && t < 1;
+        if (mesh.visible) {
+          mesh.scale.setScalar(.25 + 2.5 * t);
+          mesh.material.opacity = .72 * (1 - t) ** 2;
+        }
+      }
+      splash.bubbleMaterial.uniforms.uViewportHeight.value = innerHeight * Math.min(devicePixelRatio, 2);
+      splash.particles.forEach((particle, j) => {
+        const t = age - particle.delay;
+        const life = t / (particle.spray ? .72 : 1.9);
+        const offset = j * 3;
+        splash.alphas[j] = life > 0 && life < 1 ? (particle.spray ? .9 : .72) * (1 - life) : 0;
+        const lateral = particle.radius + particle.speed * Math.max(0, t) * (particle.spray ? .42 : .14);
+        splash.positions[offset] = splash.right.x * Math.cos(particle.angle) * lateral;
+        splash.positions[offset + 1] = particle.spray
+          ? particle.speed * Math.max(0, t) - 5 * Math.max(0, t) ** 2
+          : particle.speed * Math.max(0, t) * .55;
+        splash.positions[offset + 2] = splash.right.z * Math.cos(particle.angle) * lateral
+          + Math.sin(particle.angle) * lateral * .45;
+      });
+      splash.bubbleGeometry.attributes.position.needsUpdate = true;
+      splash.bubbleGeometry.attributes.aAlpha.needsUpdate = true;
+    }
+  }
 
   function remove(key) {
     const creature = creatures.get(key);
@@ -182,7 +291,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
     creatures.delete(key);
   }
 
-  function add(entry, key) {
+  function add(entry, key, entering) {
     pending.set(key, entry.version);
     textureLoader.load(urlOf(entry), (texture) => {
       if (pending.get(key) !== entry.version) { texture.dispose(); return; }
@@ -202,7 +311,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
       const back = configureMaterial(texture, config, THREE.BackSide, 0xe8f2f5);
       const group = new THREE.Group();
       group.name = `Fish • ${entry.species} • ${entry.id}`;
-      const frontMesh = new THREE.Mesh(geometry, front), backMesh = new THREE.Mesh(geometry, back);
+      const meshGeometry = config.swimStyle === 'ray' ? rayGeometry : geometry;
+      const frontMesh = new THREE.Mesh(meshGeometry, front), backMesh = new THREE.Mesh(meshGeometry, back);
       frontMesh.position.z = .018;
       backMesh.position.z = -.018;
       frontMesh.renderOrder = 5;
@@ -211,7 +321,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
       group.scale.set(width, height, 1);
       root.add(group);
 
-      creatures.set(key, {
+      const creature = {
         ...entry, group, texture, materials: [front, back], seed, config,
         radius: range(config.radiusRange, randomAt(seed, 2)),
         radiusRatio: THREE.MathUtils.lerp(.82, 1.16, randomAt(seed, 3)),
@@ -234,7 +344,35 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
         ],
         speedFactor: 1,
         verticalVelocity: 0,
-      });
+        entrance: null,
+      };
+      if (entering) {
+        camera.updateMatrixWorld();
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        const desiredAngle = Math.atan2(forward.z, forward.x) + (randomAt(seed, 27) - .5) * .9;
+        creature.startAngle += desiredAngle - routeAngle(creature, lastOrbitTime);
+        const destination = route(creature, lastOrbitTime, new THREE.Vector3());
+        const projected = destination.clone().project(camera);
+        const depth = THREE.MathUtils.clamp(creature.radius * .85, 13, 18);
+        const halfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * depth;
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        const x = THREE.MathUtils.clamp(projected.x + (randomAt(seed, 28) - .5) * .18, -.56, .56);
+        const screenPoint = (screenY) => camera.position.clone().addScaledVector(forward, depth)
+          .addScaledVector(right, x * halfHeight * camera.aspect).addScaledVector(up, screenY * halfHeight);
+        const start = screenPoint(1.25 + height / (2 * halfHeight));
+        const impact = screenPoint(.53);
+        creature.entrance = {
+          startTime: performance.now() / 1000,
+          start, impact,
+          impactVelocity: impact.clone().sub(start).multiplyScalar(2 / DROP_SECONDS),
+          fallQuaternion: camera.quaternion.clone().multiply(
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2)),
+          splashed: false,
+        };
+      }
+      creatures.set(key, creature);
     }, undefined, (error) => {
       pending.delete(key);
       console.warn(`No se pudo cargar ${entry.file ?? entry.id}`, error);
@@ -249,9 +387,11 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
     for (const [key, entry] of desired) {
       const current = creatures.get(key);
       if (current?.version === entry.version || pending.get(key) === entry.version) continue;
+      const entering = hasSynced && !current && !pending.has(key);
       remove(key);
-      add(entry, key);
+      add(entry, key, entering);
     }
+    hasSynced = true;
   }
 
   const position = new THREE.Vector3(), ahead = new THREE.Vector3(), travel = new THREE.Vector3();
@@ -275,15 +415,17 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
     let depthWander = 0;
     for (const wave of creature.verticalWaves) depthWander += Math.sin((orbitTime + advance) * wave.frequency + wave.phase) * wave.amplitude;
     depthWander *= creature.config.verticalDrift;
-    target.set(
-      center.x + Math.cos(t) * radial,
-      THREE.MathUtils.clamp(creature.height + depthWander, 3.8, 15.2),
-      center.z + Math.sin(t) * radial * creature.radiusRatio,
-    );
+    const x = center.x + Math.cos(t) * radial;
+    const z = center.z + Math.sin(t) * radial * creature.radiusRatio;
+    const y = creature.config.swimStyle === 'ray'
+      ? sandHeight(x, z) + 5.2 + creature.height * .25 + depthWander * .25
+      : Math.max(Math.max(0, terrainHeight(x, z)) + Math.max(.65, creature.group.scale.y * .45), creature.height + depthWander);
+    target.set(x, THREE.MathUtils.clamp(y, 0, 15.2), z);
     return target;
   }
 
-  function update(orbitTime, _ambientTime, motionScale = 1) {
+  function update(orbitTime, ambientTime, motionScale = 1) {
+    lastOrbitTime = orbitTime;
     for (const creature of creatures.values()) {
       route(creature, orbitTime, position);
       route(creature, orbitTime, ahead, .3);
@@ -292,28 +434,74 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf }) {
       creature.speedFactor = THREE.MathUtils.clamp(metresPerSecond / nominalSpeed, .2, 2.4);
       creature.verticalVelocity = (ahead.y - position.y) / .3;
       travel.subVectors(ahead, position).normalize();
-      creature.group.position.copy(position);
-      xAxis.copy(travel).multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);
-      zAxis.crossVectors(xAxis, worldUp).normalize();
-      yAxis.crossVectors(zAxis, xAxis).normalize();
+      if (creature.config.swimStyle === 'ray') {
+        xAxis.set(travel.x, 0, travel.z).normalize()
+          .multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);
+        // Keep the disc level along its path, but lean its back gently toward the viewer.
+        zAxis.set(camera.position.x - position.x, 0, camera.position.z - position.z);
+        zAxis.addScaledVector(xAxis, -zAxis.dot(xAxis)).normalize();
+        zAxis.multiplyScalar(.42).add(worldUp).normalize();
+        yAxis.crossVectors(zAxis, xAxis).normalize();
+      } else {
+        xAxis.copy(travel).multiplyScalar(creature.config.tailSide === 'right' ? -1 : 1);
+        zAxis.crossVectors(xAxis, worldUp).normalize();
+        yAxis.crossVectors(zAxis, xAxis).normalize();
+      }
       basis.makeBasis(xAxis, yAxis, zAxis);
       creature.group.quaternion.setFromRotationMatrix(basis);
 
+      const entrance = creature.entrance;
+      let falling = false;
+      let swimBlend = 1;
+      if (entrance) {
+        const age = Math.max(0, ambientTime - entrance.startTime);
+        if (age < DROP_SECONDS) {
+          const t = age / DROP_SECONDS;
+          creature.group.position.copy(entrance.start).lerp(entrance.impact, t * t);
+          creature.group.quaternion.copy(entrance.fallQuaternion);
+          creature.group.rotateZ(Math.sin(t * Math.PI * 2) * .065);
+          falling = true;
+          swimBlend = 0;
+        } else {
+          if (!entrance.splashed) {
+            splashAt(entrance.impact, creature.seed, entrance.startTime + DROP_SECONDS);
+            entrance.splashed = true;
+          }
+          const sinceImpact = age - DROP_SECONDS;
+          const swim = THREE.MathUtils.clamp(sinceImpact / SWIM_IN_SECONDS, 0, 1);
+          swimBlend = smoothstep(swim / .4);
+          creature.group.position.copy(entrance.impact).lerp(position, smoothstep(swim));
+          // La velocidad de caída continúa bajo el agua y se disipa en un pequeño rebote.
+          const bounce = Math.exp(-BOUNCE_DAMPING * sinceImpact)
+            * Math.sin(BOUNCE_FREQUENCY * sinceImpact) / BOUNCE_FREQUENCY;
+          creature.group.position.addScaledVector(entrance.impactVelocity, bounce);
+          const swimOrientation = creature.group.quaternion.clone();
+          creature.group.quaternion.copy(entrance.fallQuaternion)
+            .slerp(swimOrientation, swimBlend);
+          if (swim >= 1) creature.entrance = null;
+        }
+      } else {
+        creature.group.position.copy(position);
+      }
+
       const routePhase = routeAngle(creature, orbitTime);
       const turn = Math.sin(routePhase * 2 + creature.routePhase);
-      creature.group.rotateX(turn * creature.config.bankingStrength * motionScale);
-      creature.group.rotateY(Math.sin(orbitTime * .37 + creature.phase) * .025 * motionScale);
+      if (!falling) {
+        creature.group.rotateX(turn * creature.config.bankingStrength * motionScale * swimBlend);
+        creature.group.rotateY(Math.sin(orbitTime * .37 + creature.phase) * .025 * motionScale * swimBlend);
+      }
       // La fase de la cola la manda el avance de la ruta: cuanto más rápido viaja, más rápido bate.
       const routeProgress = (routePhase - creature.startAngle) * creature.direction;
       const swimPhase = routeProgress * creature.tailRate * creature.orbitSeconds + creature.phase;
       for (const material of creature.materials) {
         const uniforms = material.userData.fishUniforms;
         uniforms.phase.value = swimPhase;
-        uniforms.motion.value = motionScale;
-        uniforms.turn.value = turn;
-        uniforms.speed.value = creature.speedFactor;
+        uniforms.motion.value = motionScale * (.2 + .8 * swimBlend);
+        uniforms.turn.value = turn * swimBlend;
+        uniforms.speed.value = .2 + (creature.speedFactor - .2) * swimBlend;
       }
     }
+    updateSplashes(ambientTime);
   }
 
   return {
