@@ -29,6 +29,7 @@ const status = { rows: [], error: null, lastSync: 0, fps: 0 };
 const loading = document.getElementById('loading');
 const progress = document.getElementById('progress');
 const canvas = document.getElementById('sea');
+const fpsIndicator = document.getElementById('fps');
 
 let reef;
 try {
@@ -42,6 +43,23 @@ try {
   throw err;
 }
 loading.hidden = true;
+
+function updateFpsIndicator() {
+  fpsIndicator.textContent = `${status.fps} FPS · ${reef.quality === 'eco' ? 'Eco' : 'Ultra'}`;
+}
+updateFpsIndicator();
+
+addEventListener('keydown', (event) => {
+  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === 'F1') {
+    event.preventDefault();
+    reef.resetView();
+  } else if (event.key === 'F2') {
+    event.preventDefault();
+    reef.setQuality(reef.quality === 'eco' ? 'ultra' : 'eco');
+    updateFpsIndicator();
+  }
+});
 
 const creatures = createCreatureSystem({
   scene: reef.scene,
@@ -84,21 +102,27 @@ function drawDebug(now) {
 let last = performance.now(), frames = 0, fpsStart = last, orbitTime = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(.05, (now - last) / 1000);
+  const elapsed = Math.max(0, (now - last) / 1000);
   last = now;
   if (document.hidden) return;
+  const dt = Math.min(.05, elapsed);
   orbitTime += dt * SPEED;
   creatures.update(orbitTime, now / 1000, reef.shared.uMotionScale.value);
-  reef.render(dt);
+  reef.render(Math.min(.25, elapsed));
 
   frames++;
   if (now - fpsStart > 1000) {
     status.fps = Math.round(frames * 1000 / (now - fpsStart));
     frames = 0;
     fpsStart = now;
+    updateFpsIndicator();
   }
 }
 requestAnimationFrame(frame);
+addEventListener('visibilitychange', () => {
+  last = fpsStart = performance.now();
+  frames = 0;
+});
 
 if (DEBUG) {
   document.getElementById('debug').hidden = false;

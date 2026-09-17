@@ -1,6 +1,6 @@
 // Fondo 3D del acuario: el arrecife de Martín (github.com/LIA-DiTella/ditella-day, web/src/main.js).
 // La escena, los materiales con cáusticas, la superficie, los haces de luz y las partículas son de ese proyecto.
-// Acá se sacaron la interfaz y los controles de cámara (la cámara queda fija) y se expone una API para el acuario.
+// Acá se adapta la interfaz y se expone una API para el acuario.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -16,6 +16,8 @@ const TAU = Math.PI * 2;
 const PAN_SECONDS = 120;           // una vuelta completa, igual que el paneo del proyecto de Martín
 const PITCH = -.12;                // un poco más alta y mirando hacia abajo: el encuadre queda más alejado
 const CAMERA_Y = 3.2;
+const DRAG_SENSITIVITY = .0035;
+const CAMERA_SMOOTHING = .05;      // segundos; independiente de la tasa de cuadros
 
 /**
  * El mismo mapa de alturas cenital que usa el shader, pero leído en CPU: dice a qué altura llega el coral en
@@ -42,13 +44,12 @@ async function loadHeightfield(url) {
   };
 }
 const QUALITY = {
-  low: { dpr: 1, shadows: false, bloom: false, motes: 85, bubbles: 120, distance: 72 },
-  medium: { dpr: 1.25, shadows: true, bloom: true, motes: 170, bubbles: 200, distance: 100 },
-  high: { dpr: 2, shadows: true, bloom: true, motes: 240, bubbles: 240, distance: 165 },
+  eco: { dpr: 1, shadows: false, bloom: false, motes: 85, bubbles: 120, distance: 72 },
+  ultra: { dpr: 2, shadows: true, bloom: true, motes: 240, bubbles: 240, distance: 165 },
 };
 
-/** Crea el arrecife sobre un canvas. Devuelve la escena, la cámara fija y un render(dt). */
-export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 'medium', onProgress, pan = true } = {}) {
+/** Crea el arrecife sobre un canvas. Devuelve la escena, los controles y un render(dt). */
+export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 'ultra', onProgress, pan = true } = {}) {
   const textureLoader = new THREE.TextureLoader();
   const atlas = textureLoader.load(`${ASSETS}caustics.png`);
   const overhead = textureLoader.load(`${ASSETS}overhead.png`);
@@ -77,7 +78,8 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 
   camera.position.set(0, CAMERA_Y, 0);
   camera.rotation.order = 'YXZ';
   camera.rotation.set(PITCH, 0, 0, 'YXZ');
-  let yaw = 0, pitch = PITCH, dragging = null, lastInteraction = -1e5;
+  let yaw = 0, pitch = PITCH, targetYaw = 0, targetPitch = PITCH;
+  let dragging = null, lastInteraction = -1e5;
 
   // Arrastrar con el mouse (o el dedo) gira la vista; el paneo automático se retoma al rato de soltar.
   canvas.addEventListener('pointerdown', (e) => {
@@ -87,8 +89,8 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 
   });
   canvas.addEventListener('pointermove', (e) => {
     if (dragging?.id !== e.pointerId) return;
-    yaw += (e.clientX - dragging.x) * .0035;
-    pitch = Math.min(1.05, Math.max(-.9, pitch - (e.clientY - dragging.y) * .0035));
+    targetYaw -= (e.clientX - dragging.x) * DRAG_SENSITIVITY;
+    targetPitch = Math.min(1.05, Math.max(-.9, targetPitch - (e.clientY - dragging.y) * DRAG_SENSITIVITY));
     dragging.x = e.clientX;
     dragging.y = e.clientY;
     lastInteraction = performance.now();
@@ -96,6 +98,13 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'low' : 
   const release = () => { dragging = null; lastInteraction = performance.now(); };
   canvas.addEventListener('pointerup', release);
   canvas.addEventListener('pointercancel', release);
+
+  function resetView() {
+    yaw = targetYaw = 0;
+    pitch = targetPitch = PITCH;
+    camera.rotation.set(pitch, yaw, 0, 'YXZ');
+    lastInteraction = performance.now();
+  }
 
   const terrainHeight = await loadHeightfield(`${ASSETS}overhead.png`);
 
@@ -356,26 +365,28 @@ float waterCaustic(vec2 p) {
   }
 
   function setQuality(value) {
-    quality = QUALITY[value] ? value : 'medium';
+    // Los enlaces anteriores siguen funcionando; Balanced se convierte en Ultra.
+    quality = value === 'low' ? 'eco' : value === 'medium' || value === 'high' ? 'ultra'
+      : QUALITY[value] ? value : 'ultra';
     const q = QUALITY[quality];
     renderer.setPixelRatio(Math.min(devicePixelRatio, q.dpr));
     renderer.shadowMap.enabled = q.shadows;
     renderer.shadowMap.needsUpdate = true;
-    const size = quality === 'low' ? 1024 : 2048;
+    const size = quality === 'eco' ? 1024 : 2048;
     if (sun.shadow.mapSize.x !== size) {
       sun.shadow.map?.dispose();
       sun.shadow.map = null;
       sun.shadow.mapSize.set(size, size);
     }
     bloom.enabled = q.bloom;
-    shafts.visible = quality !== 'low';
+    shafts.visible = quality !== 'eco';
     motes.geometry.setDrawRange(0, q.motes);
     bubbles.geometry.setDrawRange(0, q.bubbles);
     camera.far = q.distance;
     camera.updateProjectionMatrix();
     for (const o of renderables) {
       const family = o.userData.web_family || o.material?.name || '';
-      o.visible = !(quality === 'low' && /grass|fan/.test(family) && o.userData.reviewDistance > 35);
+      o.visible = !(quality === 'eco' && /grass|fan/.test(family) && o.userData.reviewDistance > 35);
     }
     resize();
   }
@@ -386,7 +397,7 @@ float waterCaustic(vec2 p) {
 
   let time = 0;
   return {
-    scene, camera, renderer, shared, setQuality, applyWater,
+    scene, camera, renderer, shared, setQuality, resetView, applyWater,
     root: gltf.scene,  // geometría del arrecife: el acuario la usa para saber si un coral tapa a un pez
     get quality() { return quality; },
     terrainHeight,  // altura del coral en (x, z): la usan los peces para no meterse dentro de la roca
@@ -395,7 +406,10 @@ float waterCaustic(vec2 p) {
     render(dt) {
       time = (time + dt) % PERIOD;
       shared.uReefPhase.value = time / PERIOD * TAU;
-      if (pan && !dragging && performance.now() - lastInteraction > 4000) yaw -= dt * TAU / PAN_SECONDS;
+      if (pan && !dragging && performance.now() - lastInteraction > 4000) targetYaw -= dt * TAU / PAN_SECONDS;
+      const blend = 1 - Math.exp(-dt / CAMERA_SMOOTHING);
+      yaw += (targetYaw - yaw) * blend;
+      pitch += (targetPitch - pitch) * blend;
       camera.rotation.set(pitch, yaw, 0, 'YXZ');
       if (QUALITY[quality].bloom) composer.render();
       else renderer.render(scene, camera);

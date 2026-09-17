@@ -27,7 +27,7 @@ El movimiento de los escaneos es el sistema de criaturas de Martín, portado tal
 
 Cada especie ajusta ancho, altura, radio y ritmo en la tabla `SPECIES` de `creatures.js`: el tiburón es grande y lento, la raya lleva el cuerpo casi todo flexible para ondular el disco, el pulpo va lento y la estrella casi no se mueve.
 
-**Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar.
+**Arrastrar con el mouse** gira la vista; el paneo automático se retoma unos segundos después de soltar. **F1** restablece la vista y **F2** alterna entre gráficos Eco y Ultra. El indicador de FPS y calidad aparece en la esquina superior derecha.
 
 Muestra los peces fijos (`permanent`) y los visitantes activos.
 
@@ -45,7 +45,7 @@ Parámetros de URL:
 
 - `aquarium.html?demo=1`: funciona sin base.
 - `&debug=1`: muestra conteos, fps y la próxima rotación.
-- `&quality=low|medium|high`: calidad del render (por defecto según el ancho de pantalla).
+- `&quality=eco|ultra`: calidad del render (Eco en pantallas angostas, Ultra en las demás). Los enlaces anteriores con `low`, `medium` o `high` siguen funcionando; `medium` usa Ultra.
 - `&speed=N`: acelera la simulación de los peces, para ver entradas, escondites y loops sin esperar.
 - `&pan=0`: deja la cámara quieta en el encuadre inicial.
 

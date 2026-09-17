@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐠</text></svg>">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #052a3d; color: #e8f7fb; font: 14px/1.5 system-ui, -apple-system, sans-serif; }
-  #sea { display: block; width: 100vw; height: 100vh; }
+  #sea { display: block; width: 100vw; height: 100vh; touch-action: none; }
   #loading {
     position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
     background: radial-gradient(120% 90% at 50% 20%, #0b4a63, #052a3d 70%); text-align: center; padding: 24px;
@@ -20,6 +20,11 @@
     margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(0, 20, 40, .6); color: #e8f7fb;
     font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre;
   }
+  #fps {
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); right: calc(env(safe-area-inset-right, 0px) + 12px);
+    padding: 4px 7px; border-radius: 5px; background: rgba(0, 20, 40, .6); color: #e8f7fb;
+    font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none;
+  }
   [hidden] { display: none !important; }
 </style>
 <script type="importmap">
@@ -29,6 +34,7 @@
 <body>
 <canvas id="sea"></canvas>
 <div id="loading">Cargando el arrecife…<div class="bar"><i id="progress"></i></div></div>
+<div id="fps" aria-label="Cuadros por segundo y calidad gráfica"></div>
 <pre id="debug" hidden></pre>
 <script type="module" src="aquarium.js"></script>
 </body>
