@@ -121,6 +121,7 @@ function drawDebug(now) {
     `cámara: rumbo ${String(heading).padStart(3, '0')}° (vuelta cada 120 s) · arrastrar para girar`,
     `en el acuario: ${status.rows.length} (permanentes ${permanent} · visitantes ${status.rows.length - permanent})`,
     `nadando: ${creatures.count}${creatures.pending ? ` · cargando ${creatures.pending}` : ''}`,
+    `dibujos por cuadro: ${reef.renderer.info.render.calls}`,
     `próxima rotación: ${new Date(left).toISOString().slice(11, 19)}`,
     status.error ? `error: ${status.error}` : '',
     '',

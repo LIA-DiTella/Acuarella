@@ -10,10 +10,37 @@ const SPLASH_SECONDS = 2.1;
 const BOUNCE_FREQUENCY = 7.5;
 const BOUNCE_DAMPING = 3;
 const STAR_SAND_CLEARANCE = .025;
+const STAR_REVEAL_DELAY = .35;
+const STAR_REVEAL_SECONDS = 3.45;
+const STAR_REVEAL_LIFT = 2.5;
+const STAR_REVEAL_REPEAT_SECONDS = 9;
 
 function smoothstep(value) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function starHopPose(age, phase) {
+  if (age < .28) return { lift: 0, face: 0, squash: .12 * smoothstep(age / .28), stretch: 0,
+    swayX: 0, swayY: 0, flutterX: 0, flutterY: 0, flutterZ: 0 };
+  if (age < .9) {
+    const t = (age - .28) / .62;
+    return { lift: STAR_REVEAL_LIFT * (1 - Math.pow(1 - t, 3)), face: smoothstep(t),
+      squash: .12 * (1 - smoothstep(t / .18)), stretch: .12 * Math.sin(Math.PI * t),
+      swayX: 0, swayY: 0, flutterX: 0, flutterY: 0, flutterZ: .08 * Math.sin(Math.PI * t) };
+  }
+  // Air resistance softens the descent; side drift and changing tilt make it flutter like paper.
+  const t = (age - .9) / (STAR_REVEAL_SECONDS - .9);
+  const flutter = Math.pow(Math.sin(Math.PI * t), .8);
+  return {
+    lift: STAR_REVEAL_LIFT * (1 - smoothstep(t)), face: 1 - smoothstep(t), squash: 0,
+    stretch: .055 * flutter * Math.sin(5 * Math.PI * t + phase),
+    swayX: .28 * flutter * Math.sin(4.5 * Math.PI * t + phase),
+    swayY: .17 * flutter * Math.sin(3 * Math.PI * t + phase * .7),
+    flutterX: .24 * flutter * Math.sin(5 * Math.PI * t + phase),
+    flutterY: .18 * flutter * Math.sin(4 * Math.PI * t + phase * .6),
+    flutterZ: .16 * flutter * Math.sin(3 * Math.PI * t + phase * .4),
+  };
 }
 
 const DEFAULT_SPECIES = {
@@ -218,17 +245,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
   const sampleSand = sandSurface || ((x, z) => ({ height: sandHeight(x, z), normal: new THREE.Vector3(0, 1, 0) }));
 
   function findStarAnchor(seed, minimumSpacing) {
-    camera.updateMatrixWorld();
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    const ranked = starPatches.map(([x, z]) => {
-      const direction = new THREE.Vector3(x - center.x, 0, z - center.z);
-      const distance = direction.length();
-      const viewAlignment = direction.normalize().dot(forward);
-      return { x, z, distance, viewAlignment, score: viewAlignment * 2 - Math.abs(distance - 11) * .12 };
-    }).filter((patch) => patch.viewAlignment > .35 && patch.distance <= 16)
-      .sort((a, b) => b.score - a.score);
-    const pool = ranked.length ? ranked : starPatches.map(([x, z]) => ({ x, z }));
+    // Every validated patch is eligible, including positions behind the current camera view.
+    const pool = starPatches.map(([x, z]) => ({ x, z }));
     const first = Math.floor(randomAt(seed, 80) * pool.length);
     let bestAvailable;
     let bestClearance = -Infinity;
@@ -418,6 +436,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       const creature = {
         ...entry, group, texture, materials: [front, back], seed, config,
         geometry: config.swimStyle === 'star' ? meshGeometry : null,
+        restScale: group.scale.clone(),
         anchor, starFrame,
         radius: range(config.radiusRange, randomAt(seed, 2)),
         radiusRatio: THREE.MathUtils.lerp(.82, 1.16, randomAt(seed, 3)),
@@ -441,6 +460,18 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
         speedFactor: 1,
         verticalVelocity: 0,
         entrance: null,
+        reveal: {
+          wasVisible: false,
+          revealedInView: false,
+          visibleSince: -Infinity,
+          active: false,
+          startTime: -Infinity,
+          lastStart: -Infinity,
+          swayPhase: randomAt(seed, 77) * TAU,
+          roll: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1),
+            (randomAt(seed, 76) - .5) * .22),
+        },
+        starRevealStrength: 0,
       };
       if (entering) {
         camera.updateMatrixWorld();
@@ -494,6 +525,15 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
   const position = new THREE.Vector3(), ahead = new THREE.Vector3(), travel = new THREE.Vector3();
   const xAxis = new THREE.Vector3(), yAxis = new THREE.Vector3(), worldUp = new THREE.Vector3(0, 1, 0);
   const zAxis = new THREE.Vector3(), basis = new THREE.Matrix4();
+  const naturalOrientation = new THREE.Quaternion(), revealOrientation = new THREE.Quaternion();
+  const cameraForward = new THREE.Vector3(), cameraToStar = new THREE.Vector3();
+
+  function starIsVisible(anchor) {
+    camera.getWorldDirection(cameraForward);
+    cameraToStar.subVectors(anchor, camera.position);
+    // This broad forward-view test is stable while the camera is smoothly panning.
+    return cameraToStar.dot(cameraForward) > 0;
+  }
 
   function routeAngle(creature, orbitTime) {
     const nominalRate = TAU / creature.orbitSeconds * creature.direction;
@@ -529,6 +569,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
 
   function update(orbitTime, ambientTime, motionScale = 1) {
     lastOrbitTime = orbitTime;
+    camera.updateMatrixWorld();
     for (const creature of creatures.values()) {
       route(creature, orbitTime, position);
       route(creature, orbitTime, ahead, .3);
@@ -557,6 +598,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       }
       basis.makeBasis(xAxis, yAxis, zAxis);
       creature.group.quaternion.setFromRotationMatrix(basis);
+      naturalOrientation.copy(creature.group.quaternion);
 
       const entrance = creature.entrance;
       let falling = false;
@@ -593,6 +635,50 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
         creature.group.position.copy(position);
       }
 
+      let starReveal = 0;
+      if (creature.config.swimStyle === 'star' && !creature.entrance) {
+        creature.group.scale.copy(creature.restScale);
+        const reveal = creature.reveal;
+        const visible = starIsVisible(position);
+        if (visible && !reveal.wasVisible) {
+          reveal.visibleSince = ambientTime;
+        }
+        if (!visible) {
+          reveal.visibleSince = -Infinity;
+          reveal.revealedInView = false;
+        }
+        reveal.wasVisible = visible;
+        const readyForReveal = !reveal.revealedInView
+          ? ambientTime - reveal.visibleSince >= STAR_REVEAL_DELAY
+          : ambientTime - reveal.lastStart >= STAR_REVEAL_REPEAT_SECONDS;
+        if (visible && !reveal.active && readyForReveal) {
+          reveal.active = true;
+          reveal.revealedInView = true;
+          reveal.startTime = ambientTime;
+          reveal.lastStart = ambientTime;
+        }
+        if (reveal.active) {
+          const age = ambientTime - reveal.startTime;
+          if (age < STAR_REVEAL_SECONDS) {
+            const pose = starHopPose(age, reveal.swayPhase);
+            starReveal = THREE.MathUtils.clamp(pose.lift / STAR_REVEAL_LIFT + Math.abs(pose.flutterX) * .35, 0, 1);
+            creature.group.position.addScaledVector(creature.starFrame.normal, pose.lift);
+            creature.group.position.addScaledVector(creature.starFrame.xAxis, pose.swayX);
+            creature.group.position.addScaledVector(creature.starFrame.yAxis, pose.swayY);
+            revealOrientation.copy(camera.quaternion).multiply(reveal.roll);
+            creature.group.quaternion.copy(naturalOrientation).slerp(revealOrientation, pose.face);
+            creature.group.rotateX(pose.flutterX);
+            creature.group.rotateY(pose.flutterY);
+            creature.group.rotateZ(pose.flutterZ);
+            creature.group.scale.set(creature.restScale.x * (1 + pose.squash - pose.stretch * .55),
+              creature.restScale.y * (1 - pose.squash * .7 + pose.stretch), 1);
+          } else {
+            reveal.active = false;
+          }
+        }
+      }
+      creature.starRevealStrength = starReveal;
+
       const routePhase = routeAngle(creature, orbitTime);
       const turn = Math.sin(routePhase * 2 + creature.routePhase);
       if (!falling && creature.config.swimStyle !== 'star') {
@@ -607,7 +693,8 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       for (const material of creature.materials) {
         const uniforms = material.userData.fishUniforms;
         uniforms.phase.value = swimPhase;
-        uniforms.motion.value = motionScale * (.2 + .8 * swimBlend);
+        const revealMotion = creature.config.swimStyle === 'star' ? 1 + starReveal * .7 : 1;
+        uniforms.motion.value = motionScale * (.2 + .8 * swimBlend) * revealMotion;
         uniforms.turn.value = turn * swimBlend;
         uniforms.speed.value = .2 + (creature.speedFactor - .2) * swimBlend;
       }

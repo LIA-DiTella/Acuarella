@@ -345,23 +345,20 @@ class UnrealBloomPass extends Pass {
 		renderer.clear();
 		this._fsQuad.render( renderer );
 
-		// Blend it additively over the input texture
+		// The output pass may combine bloom with the scene during tone mapping.
+		if ( this.skipBlend !== true ) {
+			this._fsQuad.material = this.blendMaterial;
+			this.copyUniforms[ 'tDiffuse' ].value = this.renderTargetsHorizontal[ 0 ].texture;
 
-		this._fsQuad.material = this.blendMaterial;
-		this.copyUniforms[ 'tDiffuse' ].value = this.renderTargetsHorizontal[ 0 ].texture;
+			if ( maskActive ) renderer.state.buffers.stencil.setTest( true );
 
-		if ( maskActive ) renderer.state.buffers.stencil.setTest( true );
-
-		if ( this.renderToScreen ) {
-
-			renderer.setRenderTarget( null );
-			this._fsQuad.render( renderer );
-
-		} else {
-
-			renderer.setRenderTarget( readBuffer );
-			this._fsQuad.render( renderer );
-
+			if ( this.renderToScreen ) {
+				renderer.setRenderTarget( null );
+				this._fsQuad.render( renderer );
+			} else {
+				renderer.setRenderTarget( readBuffer );
+				this._fsQuad.render( renderer );
+			}
 		}
 
 		// Restore renderer settings

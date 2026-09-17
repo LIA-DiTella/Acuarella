@@ -71,6 +71,37 @@ const QUALITY = {
   ultra: { dpr: 2, shadows: true, bloom: true, motes: 240, bubbles: 240, distance: 165 },
 };
 
+// Two neighboring Gaussian taps can be fetched with one bilinear lookup. The
+// weighted position reproduces the original convolution while halving the
+// texture reads in each bloom blur pass.
+class PairedSampleBloomPass extends UnrealBloomPass {
+  _getSeparableBlurMaterial(kernelRadius) {
+    const weights = Array.from({ length: kernelRadius }, (_, i) =>
+      .39894 * Math.exp(-.5 * i * i / (kernelRadius * kernelRadius)) / kernelRadius);
+    const total = weights[0] + 2 * weights.slice(1).reduce((sum, weight) => sum + weight, 0);
+    let samples = `vec3 result=texture2D(colorTexture,vUv).rgb*${(weights[0] / total).toPrecision(12)};`;
+    for (let i = 1; i < kernelRadius; i += 2) {
+      const next = Math.min(i + 1, kernelRadius - 1);
+      const weight = weights[i] + (next === i ? 0 : weights[next]);
+      const offset = (i * weights[i] + (next === i ? 0 : next * weights[next])) / weight;
+      samples += `vec2 offset${i}=direction*invSize*${offset.toPrecision(12)};
+        result+=(texture2D(colorTexture,vUv+offset${i}).rgb
+        +texture2D(colorTexture,vUv-offset${i}).rgb)*${(weight / total).toPrecision(12)};`;
+    }
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        colorTexture: { value: null },
+        invSize: { value: new THREE.Vector2(.5, .5) },
+        direction: { value: new THREE.Vector2(.5, .5) },
+      },
+      vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+      fragmentShader: `varying vec2 vUv; uniform sampler2D colorTexture;
+        uniform vec2 invSize; uniform vec2 direction;
+        void main(){${samples} gl_FragColor=vec4(result,1.);}`,
+    });
+  }
+}
+
 /** Crea el arrecife sobre un canvas. Devuelve la escena, los controles y un render(dt). */
 export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 'ultra', onProgress, pan = true } = {}) {
   const textureLoader = new THREE.TextureLoader();
@@ -137,6 +168,7 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.needsUpdate = true;
+  renderer.info.autoReset = false;
 
   scene.add(new THREE.HemisphereLight('#90d4ff', '#23334d', 2.2));
   const sun = new THREE.DirectionalLight('#c7eeff', 4.6);
@@ -152,9 +184,16 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .16, .55, 1.25);
+  const bloom = new PairedSampleBloomPass(new THREE.Vector2(innerWidth, innerHeight), .16, .55, 1.25);
+  bloom.skipBlend = true;
   composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+  const output = new OutputPass();
+  output.uniforms.tBloom = { value: bloom.renderTargetsHorizontal[0].texture };
+  output.material.fragmentShader = output.material.fragmentShader
+    .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse; uniform sampler2D tBloom;')
+    .replace('gl_FragColor = texture2D( tDiffuse, vUv );',
+      'gl_FragColor = texture2D( tDiffuse, vUv ); gl_FragColor.rgb += texture2D( tBloom, vUv ).rgb;');
+  composer.addPass(output);
 
   // Una sola proyección en espacio de mundo cubre todas las superficies: no hay costuras entre objetos.
   const causticFunctions = `
@@ -378,6 +417,46 @@ float waterCaustic(vec2 p) {
     o.userData.reviewDistance = box.getCenter(new THREE.Vector3()).distanceTo(camera.position);
   }
 
+  // The GLB repeats many meshes with the same geometry and material. Draw those as
+  // instances, grouping by Eco visibility and half-reef camera culling. Their
+  // matrices still drive the individual plant sway.
+  const instanceGroups = new Map();
+  for (const mesh of renderables) {
+    const family = mesh.userData.web_family || mesh.material?.name || '';
+    const ecoHidden = /grass|fan/.test(family) && mesh.userData.reviewDistance > 35;
+    box.setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const half = Math.atan2(center.z, center.x) >= 0 ? 1 : 0;
+    const key = `${mesh.geometry.id}:${mesh.material.id}:${Number(ecoHidden)}:${half}`;
+    if (!instanceGroups.has(key)) instanceGroups.set(key, []);
+    instanceGroups.get(key).push(mesh);
+  }
+  const optimizedRenderables = [];
+  const rootInverse = new THREE.Matrix4().copy(gltf.scene.matrixWorld).invert();
+  const localMatrix = new THREE.Matrix4();
+  for (const meshes of instanceGroups.values()) {
+    if (meshes.length === 1) {
+      optimizedRenderables.push(meshes[0]);
+      continue;
+    }
+    const first = meshes[0];
+    const instances = new THREE.InstancedMesh(first.geometry, first.material, meshes.length);
+    instances.name = `Reef instances • ${first.name}`;
+    instances.castShadow = first.castShadow;
+    instances.receiveShadow = first.receiveShadow;
+    instances.userData.web_family = first.userData.web_family;
+    instances.userData.reviewDistance = first.userData.reviewDistance;
+    for (let i = 0; i < meshes.length; i++) {
+      instances.setMatrixAt(i, localMatrix.multiplyMatrices(rootInverse, meshes[i].matrixWorld));
+      meshes[i].parent.remove(meshes[i]);
+    }
+    instances.computeBoundingSphere();
+    gltf.scene.add(instances);
+    optimizedRenderables.push(instances);
+  }
+  renderables.length = 0;
+  renderables.push(...optimizedRenderables);
+
   function resize() {
     const w = innerWidth, h = innerHeight;
     camera.aspect = w / h;
@@ -440,6 +519,7 @@ float waterCaustic(vec2 p) {
       camera.rotation.set(pitch, yaw, 0, 'YXZ');
       // Animated creatures have moving silhouettes, so refresh the Ultra shadow map as they swim.
       renderer.shadowMap.needsUpdate = QUALITY[quality].shadows;
+      renderer.info.reset();
       if (QUALITY[quality].bloom) composer.render();
       else renderer.render(scene, camera);
     },
