@@ -125,7 +125,7 @@ export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#087cb4');
-  scene.fog = new THREE.FogExp2('#086aab', .028);
+  scene.fog = new THREE.Fog('#086aab', 12, 48);
 
   // Cámara elevada con un poco más de cielo, manteniendo el paneo lateral lento.
   const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, .12, 170);
@@ -225,13 +225,14 @@ float waterCaustic(vec2 p) {
    * La usan los materiales del arrecife y también los peces del acuario, para que queden integrados en la escena.
    * `vertexChunk` permite agregar deformaciones propias (el vaivén de las plantas, la ondulación de los peces).
    */
-  function applyWater(material, { caustic = .7, uniforms = {}, vertexDeclarations = '', vertexChunk = '', mapChunk = '', cacheKey = 'water-v1' } = {}) {
+  function applyWater(material, { caustic = .7, uniforms = {}, vertexDeclarations = '', vertexChunk = '', normalChunk = '', mapChunk = '', cacheKey = 'water-v1' } = {}) {
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, shared, uniforms);
       shader.uniforms.uMaterialCaustic = { value: caustic };
       shader.vertexShader = `uniform float uReefPhase; uniform float uMotionScale; varying vec3 vReefWorld; varying vec3 vReefNormal;\n${vertexDeclarations}\n` + shader.vertexShader;
       if (vertexChunk) shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${vertexChunk}`);
-      if (mapChunk) shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>\n${mapChunk}`);
+      if (normalChunk) shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>\n${normalChunk}`);
+      if (mapChunk) shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', mapChunk);
       shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
         vec4 reefPosition=vec4(transformed,1.0); vec3 reefNormal=objectNormal;
         #ifdef USE_INSTANCING
@@ -249,15 +250,15 @@ float waterCaustic(vec2 p) {
         float ledgeShadow=clamp(1.-max(top-vReefWorld.y-.1,0.)*1.7,0.,1.);
         float c=smoothstep(.15,.78,waterCaustic(worldXY));
         vec3 causticBase=diffuseColor.rgb*.3+reflectedLight.directDiffuse*.7;
-        outgoingLight+=causticBase*vec3(.7,.93,1.0)*c*uCaustic*uMaterialCaustic*incidence*depthFade*ledgeShadow;
+        outgoingLight+=causticBase*vec3(1.05,1.0,.88)*c*uCaustic*uMaterialCaustic*incidence*depthFade*ledgeShadow;
         outgoingLight*=exp(-vec3(.012,.003,.0007)*reefDistance);
         vec3 waterDirection=normalize(vReefWorld-cameraPosition);
         float waterHeight=smoothstep(-.12,.85,waterDirection.y);
         vec3 waterHue=mix(vec3(.007,.075,.27),vec3(.025,.55,.83),waterHeight);
         float surfaceGlow=pow(max(dot(waterDirection,normalize(vec3(-.15,1.,.1))),0.),16.);
         waterHue+=vec3(.07,.18,.2)*surfaceGlow*(.96+.04*sin(uReefPhase));
-        float waterDensity=.032+.012*clamp((5.-vReefWorld.y)/16.,0.,1.);
-        float waterFog=1.-exp(-pow(reefDistance*waterDensity,1.65));
+        // Keep the foreground clear, then meet the sky color before the seabed ends.
+        float waterFog=smoothstep(12.,48.,reefDistance);
         outgoingLight=mix(outgoingLight,waterHue,waterFog);
         #include <opaque_fragment>`);
       shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', '');
@@ -266,17 +267,26 @@ float waterCaustic(vec2 p) {
   }
 
   function waterMaterial(mat) {
-    if (mat.normalScale) mat.normalScale.setScalar(/rock/.test(mat.name) ? .32 : /sand/.test(mat.name) ? .1 : .24);
+    if (mat.normalScale) mat.normalScale.setScalar(/rock/.test(mat.name) ? .32 : /sand/.test(mat.name) ? .05 : .24);
     if ('transmission' in mat) mat.transmission = 0;
     const flexible = /grass|fan|soft/.test(mat.name);
     const family = (mat.name.match(/PBR • ([^•]+) •/) || [])[1]?.trim() || '';
     const plantAmplitude = family === 'grass' ? .15 : family === 'fan' ? .105 : family === 'soft' ? .065 : 0;
     applyWater(mat, {
-      caustic: family === 'sand' ? 1.42 : family === 'rock' ? .3 : ((family === 'grass' || family === 'fan') ? .48 : .7),
+      caustic: family === 'sand' ? 1.55 : family === 'rock' ? .3 : ((family === 'grass' || family === 'fan') ? .48 : .7),
       cacheKey: flexible ? `reef-flex-${family}-v5` : `reef-solid-${family}-v5`,
       vertexDeclarations: flexible ? 'attribute float aPlantWeight;' : '',
+      normalChunk: family === 'sand' ? 'objectNormal=normalize(mix(objectNormal,vec3(0.,1.,0.),.45));' : '',
       // La arena queda menos saturada, como en el proyecto de Martín.
-      mapChunk: family === 'sand' ? 'diffuseColor.rgb=vec3(.28)+((diffuseColor.rgb-vec3(.28))*.72);' : '',
+      mapChunk: family === 'sand' ? `
+        #ifdef USE_MAP
+          vec4 sandA=texture2D(map,vMapUv);
+          // Cross the source bands at another angle, then soften their contrast.
+          vec2 sandUv2=vec2(vMapUv.x*.67-vMapUv.y*.74,vMapUv.x*.74+vMapUv.y*.67)*1.12+vec2(.39,.17);
+          vec4 sandB=texture2D(map,sandUv2);
+          diffuseColor*=vec4(mix(vec3(.37,.53,.64),mix(sandA,sandB,.5).rgb,.62),sandA.a);
+        #endif
+        diffuseColor.rgb=vec3(.28)+((diffuseColor.rgb-vec3(.28))*.72);` : '',
       // El vaivén de las plantas pesa por la altura del vértice (aPlantWeight), así la base queda anclada.
       vertexChunk: flexible ? `
         vec3 reefOrigin=vec3(modelMatrix[3]);
