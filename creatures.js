@@ -171,7 +171,7 @@ function configureMaterial(texture, config, side, tint) {
   const material = new THREE.MeshPhongMaterial({
     map: texture, color: tint, transparent: true, premultipliedAlpha: true,
     alphaTest: .06, depthWrite: true, side, fog: true,
-    shininess: 14, specular: 0x234b57,
+    shininess: 8, specular: 0x102b32,
     emissive: tint, emissiveMap: texture, emissiveIntensity: .55,
   });
   material.onBeforeCompile = (shader) => {
@@ -214,6 +214,23 @@ function configureMaterial(texture, config, side, tint) {
       transformed.x+=sin(uFishPhase-tailCoord*6.0)*.025*flexible*uFishMotion;
       transformed.y*=1.0-cos(uFishPhase*1.72)*.018*flexible*uFishMotion;`;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${deformation}`);
+    // A light S-curve sharpens the painted colors without clipping whites or lifting black ink.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+      #include <map_fragment>
+      diffuseColor.rgb=mix(diffuseColor.rgb,smoothstep(vec3(0.0),vec3(1.0),diffuseColor.rgb),.27);
+    `);
+    // Pale artwork already receives strong diffuse light; keep its glow from washing out the print.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
+      #include <emissivemap_fragment>
+      float fishLightness=dot(sqrt(diffuseColor.rgb),vec3(.2126,.7152,.0722));
+      totalEmissiveRadiance*=1.0-.42*smoothstep(.52,.8,fishLightness);
+    `);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+      float palePrint=smoothstep(.45,.75,fishLightness);
+      float lightPeak=max(max(outgoingLight.r,outgoingLight.g),outgoingLight.b);
+      outgoingLight*=mix(1.0,1.0/(1.0+.9*max(lightPeak-.35,0.0)),palePrint);
+      #include <opaque_fragment>
+    `);
     if (config.swimStyle === 'ray') {
       // Keep a little self-shadow on the ray without darkening its printed texture as much as the reef.
       shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_begin>',
@@ -221,7 +238,7 @@ function configureMaterial(texture, config, side, tint) {
           '(directionalLightShadow.shadowIntensity * .3)'));
     }
   };
-  material.customProgramCacheKey = () => `paper-fish-v7-${side}-${config.swimStyle || 'fish'}-${config.tailSide}-${config.bodyWaveAmplitude}-${config.tailAmplitude}-${config.bodyStiffness}`;
+  material.customProgramCacheKey = () => `paper-fish-v13-${side}-${config.swimStyle || 'fish'}-${config.tailSide}-${config.bodyWaveAmplitude}-${config.tailAmplitude}-${config.bodyStiffness}`;
   material.userData.fishUniforms = uniforms;
   return material;
 }
