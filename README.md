@@ -1,10 +1,14 @@
-# DiTella Scanner
+# Acuarella
 
-Escáner web de plantillas de peces y acuario para el DiTella Day.
+Escáner web de plantillas de peces y acuario 3D para el DiTella Day.
 
-- **Escáner:** https://lucian5102.github.io/ditella-scanner/
-- **Acuario:** https://lucian5102.github.io/ditella-scanner/aquarium.html
-- **Panel:** https://lucian5102.github.io/ditella-scanner/admin.html
+- **Escáner:** https://lia-ditella.github.io/Acuarella/
+- **Acuario:** https://lia-ditella.github.io/Acuarella/aquarium.html
+- **Panel:** https://lia-ditella.github.io/Acuarella/admin.html
+
+El arrecife 3D es de Martín ([LIA-DiTella/ditella-day](https://github.com/LIA-DiTella/ditella-day)); acá está
+integrado con el escáner. Mientras dura la mudanza sigue andando la versión anterior en
+https://lucian5102.github.io/ditella-scanner/, contra la misma base, así que los dos links muestran lo mismo.
 - **Plantillas para imprimir:** [templates/plantillas.pdf](templates/plantillas.pdf) (piraña, tiburón azul, bonito y pez piloto), más [pulpo](templates/pulpo.pdf), [raya](templates/raya.pdf) y [estrella](templates/estrella.pdf).
 
 ## Escanear
