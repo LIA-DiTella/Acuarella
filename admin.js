@@ -22,7 +22,7 @@ async function cargar() {
   decir('Cargando…');
   recargar.disabled = true;
   try {
-    filas = await adminList(CLAVE);
+    filas = await adminList();
     render();
     const visitantes = filas.filter((f) => !f.permanent).length;
     decir(`${filas.length} escaneos · ${filas.length - visitantes} fijos · ${visitantes} visitantes`);
@@ -68,7 +68,7 @@ async function borrar(f, boton) {
   if (!confirm(`¿Borrar ${f.filename}?\n\nDesaparece del acuario en la próxima sincronización. El archivo queda en Storage.`)) return;
   boton.disabled = true;
   try {
-    await adminDelete(f.id, CLAVE);
+    await adminDelete(f.id);
     filas = filas.filter((x) => x.id !== f.id);
     render();
     decir(`Borrado ${f.filename}.`);
@@ -86,7 +86,7 @@ borrarTodos.onclick = async () => {
   let hechos = 0;
   try {
     for (const f of visitantes) {
-      await adminDelete(f.id, CLAVE);
+      await adminDelete(f.id);
       hechos++;
       decir(`Borrando… ${hechos}/${visitantes.length}`);
     }
