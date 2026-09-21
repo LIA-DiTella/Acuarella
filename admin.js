@@ -2,10 +2,10 @@
 // La clave se pide una vez por dispositivo y además viaja a la base en cada llamada: sin ella, las funciones
 // admin_list_fish y admin_delete_fish no devuelven ni borran nada.
 
-import { pedirClave, CLAVE } from './gate.js';
+import { pedirClave } from './gate.js';
 import { adminList, adminDelete, publicUrl, isConfigured } from './storage.js';
 
-if (!pedirClave('Panel del acuario')) throw new Error('sin clave');
+if (!await pedirClave('Panel del acuario')) throw new Error('sin clave');
 
 const lista = document.getElementById('lista');
 const estado = document.getElementById('estado');

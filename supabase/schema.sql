@@ -171,14 +171,15 @@ grant select on public.aquarium_fish to anon, authenticated;
 
 revoke all on function public.rotate_fish() from public, anon, authenticated;
 revoke all on function public.fish_set_filename() from public, anon, authenticated;
-revoke all on function public.create_fish(text) from public;
-revoke all on function public.mark_uploaded(bigint) from public;
-revoke all on function public.fish_pending(text) from public;
-grant execute on function public.create_fish(text) to anon, authenticated;
-grant execute on function public.mark_uploaded(bigint) to anon, authenticated;
-grant execute on function public.fish_pending(text) to anon, authenticated;
+-- Escribir exige sesión del operador (supabase/auth.sql): anon solo lee el acuario.
+revoke all on function public.create_fish(text) from public, anon;
+revoke all on function public.mark_uploaded(bigint) from public, anon;
+revoke all on function public.fish_pending(text) from public, anon;
+grant execute on function public.create_fish(text) to authenticated;
+grant execute on function public.mark_uploaded(bigint) to authenticated;
+grant execute on function public.fish_pending(text) to authenticated;
 
--- Storage: bucket público; solo se pueden subir PNG que tengan una fila esperándolos --
+-- Storage: bucket público para leer; subir exige sesión y una fila esperando ese archivo --
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('fish', 'fish', true, 5242880, array['image/png'])
 on conflict (id) do update
@@ -186,7 +187,7 @@ on conflict (id) do update
 
 drop policy if exists "fish: subir escaneos" on storage.objects;
 create policy "fish: subir escaneos" on storage.objects
-  for insert to anon, authenticated
+  for insert to authenticated
   with check (bucket_id = 'fish' and public.fish_pending(name));
 
 -- Rotación cada 2 h (horas pares UTC = impares en Argentina) -------------------

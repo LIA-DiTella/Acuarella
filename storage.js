@@ -1,6 +1,9 @@
 // Acceso a Supabase por REST (sin supabase-js, para mantener el sitio sin build).
+// Leer el acuario es anónimo: es la pantalla pública. Subir un escaneo o usar el panel exige el token de la
+// sesión del operador (auth.js); sin él la base responde 401/403, aunque alguien copie la key de config.js.
 
 import { SUPABASE_URL, SUPABASE_KEY, BUCKET } from './config.js';
+import { accessToken } from './auth.js';
 
 export const isConfigured = () => Boolean(SUPABASE_URL && SUPABASE_KEY);
 
@@ -11,6 +14,13 @@ function headers(extra = {}) {
   // Las anon keys clásicas son JWT y van también como Bearer; las publishable (sb_publishable_…) no.
   if (SUPABASE_KEY.startsWith('eyJ')) h.Authorization = `Bearer ${SUPABASE_KEY}`;
   return h;
+}
+
+/** Cabeceras con el token del operador: las llamadas que escriben no funcionan sin sesión. */
+async function authHeaders(extra = {}) {
+  const jwt = await accessToken();
+  if (!jwt) throw new Error('La sesión venció: recargá la página y volvé a poner la clave.');
+  return { apikey: SUPABASE_KEY, Authorization: `Bearer ${jwt}`, ...extra };
 }
 
 async function request(path, options = {}) {
@@ -27,9 +37,9 @@ async function request(path, options = {}) {
   return body;
 }
 
-const rpc = (fn, args) => request(`/rest/v1/rpc/${fn}`, {
+const rpc = async (fn, args) => request(`/rest/v1/rpc/${fn}`, {
   method: 'POST',
-  headers: headers({ 'Content-Type': 'application/json' }),
+  headers: await authHeaders({ 'Content-Type': 'application/json' }),
   body: JSON.stringify(args),
 });
 
@@ -49,7 +59,7 @@ async function uploadPng(filename, blob) {
   try {
     await request(`/storage/v1/object/${BUCKET}/${filename}`, {
       method: 'POST',
-      headers: headers({ 'Content-Type': 'image/png', 'x-upsert': 'false' }),
+      headers: await authHeaders({ 'Content-Type': 'image/png', 'x-upsert': 'false' }),
       body: blob,
     });
   } catch (err) {
@@ -73,13 +83,13 @@ export async function saveScan(blob, species, job = {}) {
   return { ...job.row, url: publicUrl(job.row.filename) };
 }
 
-/** Panel: todos los escaneos subidos, incluidos los que hoy no están en el acuario. Requiere la clave. */
-export const adminList = (key) => rpc('admin_list_fish', { p_key: key });
+/** Panel: todos los escaneos subidos, incluidos los que hoy no están en el acuario. Exige sesión. */
+export const adminList = () => rpc('admin_list_fish', {});
 
 /** Panel: borra la fila del escaneo. El PNG queda en Storage (Supabase no deja borrarlo por SQL). */
-export const adminDelete = (id, key) => rpc('admin_delete_fish', { p_id: id, p_key: key });
+export const adminDelete = (id) => rpc('admin_delete_fish', { p_id: id });
 
-/** Peces que tienen que estar en el acuario ahora (permanentes + visitantes activos). */
+/** Peces que tienen que estar en el acuario ahora (permanentes + visitantes activos). Lectura anónima. */
 export const fetchAquarium = () => request(
   '/rest/v1/aquarium_fish?select=id,species,filename,created_at,permanent,activated_at&order=id',
   { headers: headers() },

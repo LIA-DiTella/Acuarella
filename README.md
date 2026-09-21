@@ -58,10 +58,10 @@ La clave es **la clave del equipo**, se guarda en el dispositivo y no se vuelve 
 recién al tocar **Iniciar cámara**, así que se puede pasar el link a cualquiera: ve la página y puede entrar al
 acuario sin clave.
 
-Dos aclaraciones sobre eso:
-
-- La clave de las páginas es una barrera de conveniencia: el sitio es estático, así que quien mire el código la encuentra.
-- El borrado sí está protegido de verdad: la clave viaja a la base y las funciones `admin_list_fish` y `admin_delete_fish` no devuelven ni borran nada sin ella. Se crean con `supabase/admin.sql`.
+La clave no está en ningún archivo del sitio. Lo que se tipea se manda a Supabase, que la guarda hasheada, y
+lo que vuelve es un token con vencimiento que queda en el teléfono. Con ese token abren las tres cosas que
+escriben —crear el pez, subir el PNG y borrar desde el panel—; sin él la base responde 401 aunque alguien copie
+la key de `config.js`. Leer el acuario sigue siendo anónimo. Se arma con `supabase/auth.sql`.
 
 El archivo PNG queda en Storage aunque se borre la fila, porque Supabase no permite borrarlo por SQL.
 

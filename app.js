@@ -488,7 +488,7 @@ function cameraError(err) {
 $('startBtn').onclick = async () => {
   $('error').textContent = '';
   // La clave se pide recién acá: cualquiera puede abrir el link y mirar la página o ir al acuario.
-  if (!pedirClave('Escáner de peces', { bloquear: false })) {
+  if (!(await pedirClave('Escáner de peces', { bloquear: false }))) {
     $('error').textContent = 'Clave incorrecta. Pedísela al equipo y tocá Iniciar cámara otra vez.';
     return;
   }
