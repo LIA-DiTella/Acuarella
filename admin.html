@@ -25,6 +25,10 @@
   }
   button.peligro { border-color: #ff8a8a; color: #ffd7d7; }
   button:disabled { opacity: .45; }
+  .acciones { display: flex; gap: 6px; flex: none; align-items: center; }
+  button.ojo { padding: 8px; line-height: 0; }
+  button.ojo svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  button.ojo.apagado { color: #8fb3bf; border-color: rgba(255, 255, 255, .2); }
   #estado { color: #8fb3bf; font-size: 13px; min-height: 1.4em; }
   ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   li { display: flex; gap: 12px; align-items: center; padding: 10px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 12px; background: rgba(0, 0, 0, .25); }

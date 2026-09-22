@@ -24,9 +24,11 @@ create table if not exists public.fish (
   permanent    boolean not null default false,  -- peces del equipo: siempre visibles
   active       boolean not null default false,  -- visitantes: lo maneja la rotación
   uploaded     boolean not null default false,  -- el PNG ya está en Storage
+  hidden       boolean not null default false,  -- apagado a mano desde el panel: la rotación no lo vuelve a traer
   activated_at timestamptz,
   times_shown  integer not null default 0
 );
+alter table public.fish add column if not exists hidden boolean not null default false;
 create index if not exists fish_active_idx on public.fish (active, permanent);
 
 create or replace function public.fish_set_filename() returns trigger
@@ -62,6 +64,7 @@ create or replace view public.aquarium_fish as
   cross join public.aquarium_config c
   where f.uploaded
     and f.species <> 'test'
+    and not f.hidden
     and (f.permanent or (f.active and c.visitors_enabled));
 
 -- Funciones -------------------------------------------------------------------
@@ -159,7 +162,7 @@ begin
   update public.fish set active = true, activated_at = now(), times_shown = times_shown + 1
   where id in (
     select id from public.fish
-    where not active and not permanent and uploaded and species <> 'test'
+    where not active and not permanent and uploaded and species <> 'test' and not hidden
     order by id = any (v_off), times_shown, random()
     limit greatest(c.max_visitors - v_active, 0)
   );

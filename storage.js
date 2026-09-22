@@ -89,6 +89,9 @@ export const adminList = () => rpc('admin_list_fish', {});
 /** Panel: borra la fila del escaneo. El PNG queda en Storage (Supabase no deja borrarlo por SQL). */
 export const adminDelete = (id) => rpc('admin_delete_fish', { p_id: id });
 
+/** Panel: muestra u oculta un pez. Oculto no vuelve solo con la rotación de cada 2 h. */
+export const adminSetVisible = (id, visible) => rpc('admin_set_visible', { p_id: id, p_visible: visible });
+
 /** Peces que tienen que estar en el acuario ahora (permanentes + visitantes activos). Lectura anónima. */
 export const fetchAquarium = () => request(
   '/rest/v1/aquarium_fish?select=id,species,filename,created_at,permanent,activated_at&order=id',
