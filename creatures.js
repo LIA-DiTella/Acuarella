@@ -59,6 +59,15 @@ const DEFAULT_SPECIES = {
   minHeight: 1.5,
 };
 
+/**
+ * Velocidad especial para un dibujo puntual, por nombre de archivo. El número multiplica la velocidad de
+ * crucero de su especie: 1 es lo normal y 4 es cuatro veces más rápido. La aleta bate en la misma proporción,
+ * porque en `update` la fase de la cola cancela `orbitSeconds`: sin esto el pez cruzaría planeando.
+ */
+const TURBO = {
+  'pirana-40.png': 4,
+};
+
 /** Una entrada por especie nuestra, con los mismos campos que usa él. */
 const SPECIES = {
   pirana: {
@@ -421,6 +430,7 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
       texture.needsUpdate = true;
 
       const config = { ...DEFAULT_SPECIES, ...(SPECIES[entry.species] || {}) };
+      const turbo = TURBO[entry.filename] ?? 1;
       const seed = hashString(`${entry.species}:${entry.id}`);
       const aspect = Math.max(.2, (texture.image?.naturalWidth || texture.image?.width || 1) / (texture.image?.naturalHeight || texture.image?.height || 1));
       const width = config.width * THREE.MathUtils.lerp(.86, 1.14, randomAt(seed, 1));
@@ -458,12 +468,12 @@ export function createCreatureSystem({ scene, camera, textureLoader, urlOf, sand
         radius: range(config.radiusRange, randomAt(seed, 2)),
         radiusRatio: THREE.MathUtils.lerp(.82, 1.16, randomAt(seed, 3)),
         height: range(config.heightRange, randomAt(seed, 4)),
-        orbitSeconds: range(config.orbitSecondsRange, randomAt(seed, 5)),
+        orbitSeconds: range(config.orbitSecondsRange, randomAt(seed, 5)) / turbo,
         startAngle: randomAt(seed, 6) * TAU,
         direction: randomAt(seed, 7) > .5 ? 1 : -1,
         phase: randomAt(seed, 8) * TAU,
         routePhase: randomAt(seed, 9) * TAU,
-        tailRate: config.tailFrequency * THREE.MathUtils.lerp(.88, 1.14, randomAt(seed, 10)),
+        tailRate: config.tailFrequency * THREE.MathUtils.lerp(.88, 1.14, randomAt(seed, 10)) * turbo,
         speedWaves: [
           { frequency: THREE.MathUtils.lerp(.11, .19, randomAt(seed, 11)), amplitude: 1.55, phase: randomAt(seed, 12) * TAU },
           { frequency: THREE.MathUtils.lerp(.42, .7, randomAt(seed, 13)), amplitude: .38, phase: randomAt(seed, 14) * TAU },
