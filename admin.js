@@ -12,7 +12,7 @@ const recargar = document.getElementById('recargar');
 const borrarTodos = document.getElementById('borrarTodos');
 
 const decir = (texto) => { estado.textContent = texto; };
-const fecha = (iso) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const fecha = (iso) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** Nadando ahora mismo: activo y no apagado a mano. */
 const enElAcuario = (f) => f.active && !f.hidden;
@@ -61,6 +61,7 @@ function render() {
     const nombre = document.createElement('div');
     nombre.className = 'nombre';
     nombre.textContent = f.filename;
+    nombre.title = f.filename;  // el nombre se recorta con puntos suspensivos; así se ve entero al pasar por encima
     const meta = document.createElement('div');
     meta.className = 'meta';
     const donde = f.hidden ? 'oculto' : f.active ? 'en el acuario' : 'en espera';

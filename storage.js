@@ -95,5 +95,7 @@ export const adminSetVisible = (id, visible) => rpc('admin_set_visible', { p_id:
 /** Peces que tienen que estar en el acuario ahora (permanentes + visitantes activos). Lectura anónima. */
 export const fetchAquarium = () => request(
   '/rest/v1/aquarium_fish?select=id,species,filename,created_at,permanent,activated_at&order=id',
-  { headers: headers() },
+  // Sin caché: si el navegador reusa la respuesta anterior, lo que se muestra u oculta desde el panel
+  // no se ve hasta recargar.
+  { headers: headers(), cache: 'no-store' },
 );

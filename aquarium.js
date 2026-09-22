@@ -10,7 +10,9 @@ import { fetchAquarium, publicUrl, isConfigured } from './storage.js';
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo') || !isConfigured();
 const DEBUG = params.has('debug');
-const POLL_MS = DEMO ? 5000 : 20000;
+// Se consulta seguido para que mostrar u ocultar desde el panel se vea casi al instante, sin recargar:
+// el pez que aparece en una consulta posterior entra con la misma caída animada que un escaneo nuevo.
+const POLL_MS = DEMO ? 5000 : 4000;
 const ROTATE_MS = 2 * 60 * 60 * 1000;  // igual que el cron de supabase/schema.sql
 const DEMO_ROTATE_MS = 15000;          // en demo la rotación se acelera para verla
 // ?speed=N acelera el tiempo de las órbitas, para ver el recorrido completo sin esperar.

@@ -45,7 +45,7 @@ create trigger fish_filename before insert on public.fish
 -- Configuración del acuario (una sola fila) -----------------------------------
 create table if not exists public.aquarium_config (
   id               boolean primary key default true check (id),
-  max_visitors     integer not null default 12,   -- visitantes activos a la vez
+  max_visitors     integer not null default 12,   -- visitantes a la vez · TOPE DESACTIVADO, ver rotate_fish y mark_uploaded
   rotate_count     integer not null default 2,    -- cuántos salen en cada rotación
   visitors_enabled boolean not null default true  -- false = solo peces permanentes
 );
@@ -118,15 +118,17 @@ begin
   where id = p_id
   returning * into r;
 
-  if v_show then
-    update public.fish set active = false
-    where id in (
-      select id from public.fish
-      where active and not permanent
-      order by activated_at desc nulls last, id desc
-      offset c.max_visitors
-    );
-  end if;
+  -- Sin tope de visitantes: un escaneo nuevo entra sin sacar a nadie.
+  -- Para volver al cupo, descomentar este bloque.
+  -- if v_show then
+  --   update public.fish set active = false
+  --   where id in (
+  --     select id from public.fish
+  --     where active and not permanent
+  --     order by activated_at desc nulls last, id desc
+  --     offset c.max_visitors
+  --   );
+  -- end if;
   return r;
 end $$;
 
@@ -144,17 +146,20 @@ begin
     return;
   end if;
 
-  with off as (
-    update public.fish set active = false
-    where id in (
-      select id from public.fish
-      where active and not permanent
-      order by activated_at nulls first, id
-      limit c.rotate_count
-    )
-    returning id
-  )
-  select coalesce(array_agg(id), '{}') into v_off from off;
+  -- Sin tope de visitantes: la rotación no saca a nadie, solo suma los que falten.
+  -- Para volver al cupo, descomentar este bloque y el `limit` de abajo.
+  -- with off as (
+  --   update public.fish set active = false
+  --   where id in (
+  --     select id from public.fish
+  --     where active and not permanent
+  --     order by activated_at nulls first, id
+  --     limit c.rotate_count
+  --   )
+  --   returning id
+  -- )
+  -- select coalesce(array_agg(id), '{}') into v_off from off;
+  v_off := '{}';
 
   select count(*) into v_active from public.fish where active and not permanent;
 
@@ -164,7 +169,7 @@ begin
     select id from public.fish
     where not active and not permanent and uploaded and species <> 'test' and not hidden
     order by id = any (v_off), times_shown, random()
-    limit greatest(c.max_visitors - v_active, 0)
+    -- limit greatest(c.max_visitors - v_active, 0)
   );
 end $$;
 

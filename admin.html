@@ -25,17 +25,19 @@
   }
   button.peligro { border-color: #ff8a8a; color: #ffd7d7; }
   button:disabled { opacity: .45; }
-  .acciones { display: flex; gap: 6px; flex: none; align-items: center; }
+  .acciones { display: flex; gap: 8px; flex: none; align-items: center; margin-left: auto; }
   button.ojo { padding: 8px; line-height: 0; }
   button.ojo svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
   button.ojo.apagado { color: #8fb3bf; border-color: rgba(255, 255, 255, .2); }
   #estado { color: #8fb3bf; font-size: 13px; min-height: 1.4em; }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-  li { display: flex; gap: 12px; align-items: center; padding: 10px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 12px; background: rgba(0, 0, 0, .25); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+  li { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; padding: 10px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 12px; background: rgba(0, 0, 0, .25); }
   li img { width: 96px; height: 62px; object-fit: contain; background: rgba(255, 255, 255, .06); border-radius: 8px; flex: none; }
-  .datos { flex: 1; min-width: 0; }
-  .nombre { font-weight: 600; overflow-wrap: anywhere; }
-  .meta { color: #8fb3bf; font-size: 12px; }
+  /* El nombre y la fecha se recortan con puntos suspensivos: sin esto, al angostarse la tarjeta el texto
+     se parte letra por letra. Si no entran los botones, la fila se va abajo en vez de aplastar el texto. */
+  .datos { flex: 1 1 150px; min-width: 0; }
+  .nombre { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { color: #8fb3bf; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fijo { color: #ffd23f; }
   [hidden] { display: none !important; }
 </style>

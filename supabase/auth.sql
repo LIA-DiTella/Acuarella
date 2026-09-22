@@ -65,18 +65,19 @@ begin
     raise exception 'No existe el pez %', p_id;
   end if;
 
-  -- Si se pasó del cupo, sale el visitante más viejo (misma regla que un escaneo nuevo).
-  if p_visible then
-    select * into c from public.aquarium_config;
-    update public.fish set active = false
-    where id in (
-      select id from public.fish
-      where active and not permanent
-      order by activated_at desc nulls last, id desc
-      offset c.max_visitors
-    );
-    select * into r from public.fish where id = p_id;
-  end if;
+  -- Sin tope de visitantes: mostrar uno no saca a ningún otro.
+  -- Para volver al cupo, descomentar este bloque.
+  -- if p_visible then
+  --   select * into c from public.aquarium_config;
+  --   update public.fish set active = false
+  --   where id in (
+  --     select id from public.fish
+  --     where active and not permanent
+  --     order by activated_at desc nulls last, id desc
+  --     offset c.max_visitors
+  --   );
+  --   select * into r from public.fish where id = p_id;
+  -- end if;
 
   return r;
 end $$;
