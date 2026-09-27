@@ -64,7 +64,7 @@ begin
   if not public.is_operator('admin') then
     raise exception 'Sin permiso';
   end if;
-  update public.aquarium_config set escaner_publico = p_publico;
+  update public.aquarium_config set escaner_publico = p_publico where id;  -- la API rechaza UPDATE sin WHERE
   return p_publico;
 end $$;
 revoke all on function public.admin_set_escaner_publico(boolean) from public, anon;
