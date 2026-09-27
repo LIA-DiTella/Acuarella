@@ -68,6 +68,7 @@
 <section class="tele">
   <h2>Transmitir a la tele</h2>
   <p class="sub">Esta computadora dibuja el acuario y lo manda por la red local; la tele solo reproduce el video. En el navegador de la tele abrí <code id="teleDireccion"></code>: la primera vez muestra un código de 8 caracteres, que va acá. La ventana del emisor tiene que quedar abierta y visible, porque minimizada el navegador la frena.</p>
+  <p class="sub"><strong>Una sola vez, en esta computadora:</strong> la tele y la computadora tienen que estar en la misma red Wi-Fi, y Chrome no tiene que ocultar la IP local. Abrí <code>chrome://flags</code>, buscá <code>Anonymize local IPs exposed by WebRTC</code>, ponelo en <code>Disabled</code> y reiniciá Chrome. Si no aparece: cerrá Chrome del todo y abrilo desde la Terminal con <code>open -a "Google Chrome" --args --disable-features=WebRtcHideLocalIpsWithMdns</code>.</p>
   <div class="barra">
     <input id="teleCodigo" placeholder="Código de la tele" autocomplete="off" autocapitalize="off" spellcheck="false">
     <select id="teleRes" aria-label="Resolución">

@@ -103,10 +103,20 @@ async function iniciarEmision() {
   }
   const fps = Number(params.get('fps')) === 30 ? 30 : 60;
   const titulo = `Transmitiendo ${SALIDA.w}×${SALIDA.h} a ${fps} fps · dejá esta ventana visible`;
-  aviso.textContent = `${titulo} · esperando a la tele`;
+  // Un fallo queda a la vista hasta que una tele conecte (si no, el próximo intento lo taparía).
+  let fallo = false;
+  const mostrar = (n) => {
+    if (n) fallo = false;
+    const detalle = n ? 'tele conectada'
+      : fallo ? 'la tele respondió pero no se pudo conectar: misma red Wi-Fi y ajuste de Chrome (ver panel)'
+      : 'esperando a la tele';
+    aviso.textContent = `${titulo} · ${detalle}`;
+  };
+  mostrar(0);
   emitir(canvas, codigo, {
     fps,
-    alCambiar: (n) => { aviso.textContent = `${titulo} · ${n ? 'tele conectada' : 'esperando a la tele'}`; },
+    alCambiar: mostrar,
+    alFallar: () => { fallo = true; mostrar(0); },
   });
 }
 

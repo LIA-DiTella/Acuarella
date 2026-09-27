@@ -117,7 +117,8 @@ function preferirH264(transceptor) {
  */
 export function emitir(canvas, codigo, opciones) {
   const o = opciones || {};
-  const fps = o.fps || 60, bitrate = o.bitrate || 25000000, alCambiar = o.alCambiar || (() => {});
+  const fps = o.fps || 60, bitrate = o.bitrate || 25000000;
+  const alCambiar = o.alCambiar || (() => {}), alFallar = o.alFallar || (() => {});
   const video = canvas.captureStream(fps);
   const teles = new Map();  // id de la tele → RTCPeerConnection
 
@@ -148,8 +149,12 @@ export function emitir(canvas, codigo, opciones) {
       if (e.candidate) canal.enviar({ tipo: 'ice', de: 'emisor', para: id, candidato: e.candidate.toJSON() });
     };
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed' && teles.get(id) === pc) cerrar(id);
-      else contar();
+      if (pc.iceConnectionState === 'failed' && teles.get(id) === pc) {
+        cerrar(id);
+        alFallar();  // la señal llegó pero la conexión directa no: red distinta o IPs ocultas en Chrome
+      } else {
+        contar();
+      }
     };
     const oferta = await pc.createOffer();
     await pc.setLocalDescription(oferta);
@@ -162,6 +167,10 @@ export function emitir(canvas, codigo, opciones) {
       enc.maxFramerate = fps;
     });
     await transceptor.sender.setParameters(p).catch((err) => console.warn(err));
+    // A los 15 s sin conectar, la señal llegó pero la conexión directa no (el 'failed' de ICE tarda más).
+    setTimeout(() => {
+      if (teles.get(id) === pc && !conectada(pc)) alFallar();
+    }, 15000);
   }
 
   const canal = abrirCanal(codigo, (m) => {
@@ -182,12 +191,12 @@ export function emitir(canvas, codigo, opciones) {
 
 /**
  * Reproduce en `video` la transmisión de `codigo`. Pide video hasta que llega y, si se corta, lo vuelve a pedir.
- * `alEstado` recibe 'esperando', 'conectando', 'conectado' o 'reconectando'.
+ * `alEstado` recibe 'esperando', 'conectando', 'bloqueada', 'conectado' o 'reconectando'.
  */
 export function recibir(video, codigo, alEstado) {
   const yo = nuevoCodigo();
   const avisar = alEstado || (() => {});
-  let pc = null, pedido = 0, caida = null, remotoListo = false;
+  let pc = null, pedido = 0, caida = null, trabada = null, remotoListo = false, bloqueada = false;
   let iceEnEspera = [];
 
   const conectadaAhora = () => pc !== null && conectada(pc);
@@ -216,6 +225,8 @@ export function recibir(video, codigo, alEstado) {
       const s = actual.iceConnectionState;
       clearTimeout(caida);
       if (s === 'connected' || s === 'completed') {
+        clearTimeout(trabada);
+        bloqueada = false;
         avisar('conectado');
       } else if (s === 'disconnected') {
         caida = setTimeout(() => {
@@ -235,7 +246,15 @@ export function recibir(video, codigo, alEstado) {
     const respuesta = await actual.createAnswer();
     await actual.setLocalDescription(respuesta);
     canal.enviar({ tipo: 'respuesta', de: yo, para: 'emisor', sdp: { type: 'answer', sdp: actual.localDescription.sdp } });
-    avisar('conectando');
+    if (!bloqueada) avisar('conectando');  // el aviso de bloqueo queda fijo hasta que conecte
+    // Si en 15 s no conecta, la señal llegó pero la conexión directa está bloqueada: se avisa y se sigue probando.
+    clearTimeout(trabada);
+    trabada = setTimeout(() => {
+      if (actual === pc && !conectadaAhora()) {
+        bloqueada = true;
+        avisar('bloqueada');
+      }
+    }, 15000);
   }
 
   const canal = abrirCanal(codigo, (m) => {
@@ -252,9 +271,11 @@ export function recibir(video, codigo, alEstado) {
     }
   }, pedir);
 
-  // Mientras no haya video insiste; si hay una negociación en curso le da unos segundos antes de reintentar.
+  // Mientras no haya video insiste. Si hay un intento en curso le da 20 s: reintentar antes lo reinicia en el
+  // emisor, y así ningún intento llega a conectar ni a fallar.
   const insistir = setInterval(() => {
-    if (!conectadaAhora() && Date.now() - pedido > 6000) pedir();
+    const negociando = pc !== null && (pc.iceConnectionState === 'new' || pc.iceConnectionState === 'checking');
+    if (!conectadaAhora() && Date.now() - pedido > (negociando ? 20000 : 6000)) pedir();
   }, 2000);
 
   avisar('esperando');
