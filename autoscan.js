@@ -8,9 +8,7 @@ const STEP_MM = 0.3;      // paso del perfil sobre la normal
 const MIN_CONTRAST = 35;  // diferencia mínima de gris entre papel y trazo
 const INLIER_MM = 0.6;    // una muestra cuenta si el trazo está a menos de esto del contorno ajustado
 const TRACK_Q = 0.5;      // calidad mínima para seguir el dibujo
-const LOCK_Q = 0.8;       // calidad para considerar enganchado
-const LOCK_TICKS = 6;     // ticks estables seguidos antes de disparar
-const MOVE_PX = 3;        // movimiento máximo de las esquinas entre ticks (px de análisis)
+const LOCK_Q = 0.8;       // calidad para considerar enganchado: con autocaptura dispara la ráfaga en el acto
 const RELEASE_Q = 0.4;    // tras capturar, por debajo de esta calidad se considera que sacaron la hoja…
 const RELEASE_MS = 1000;  // …durante al menos este tiempo
 
@@ -145,13 +143,6 @@ export class AutoScanner {
       return Math.hypot(p[0] - q[0], p[1] - q[1]) < limit;
     });
   }
-
-  cornerShift(A, B) {
-    return Math.max(...this.corners.map(([x, y]) => {
-      const p = hApply(A, x, y), q = hApply(B, x, y);
-      return Math.hypot(p[0] - q[0], p[1] - q[1]);
-    }));
-  }
 }
 
 /**
@@ -169,7 +160,6 @@ export class SpeciesScanner {
     this.H = null;
     this.quality = 0;
     this.state = 'searching';
-    this.stable = 0;
     this.lowSince = 0;
   }
 
@@ -183,7 +173,6 @@ export class SpeciesScanner {
       this.current = null;
       this.H = null;
       this.quality = 0;
-      this.stable = 0;
       if (this.state === 'locked') this.state = 'searching';
     }
   }
@@ -215,11 +204,12 @@ export class SpeciesScanner {
     }
 
     const tracked = r.quality >= TRACK_Q;
-    const moved = tracked && sc === this.current && this.H ? sc.cornerShift(this.H, r.H) : Infinity;
     if (tracked) this.current = sc;
     this.H = tracked ? r.H : null;
     this.quality = r.quality;
 
+    // Sin cuenta de quietud: la primera vez que encastra, dispara. La ráfaga de app.js toma varios frames y se
+    // queda con los nítidos y bien ajustados, así que un temblor justo en este tick no arruina la captura.
     let fire = false;
     if (this.state === 'cooldown') {
       if (r.quality < RELEASE_Q) {
@@ -229,26 +219,26 @@ export class SpeciesScanner {
         this.lowSince = 0;
       }
     } else if (r.quality >= LOCK_Q) {
-      this.state = 'locked';
-      this.stable = moved < MOVE_PX ? this.stable + 1 : 0;
-      if (armed && this.stable >= LOCK_TICKS) {
-        fire = true;
-        this.markCaptured();
-      }
+      this.state = armed ? 'capturing' : 'locked';  // 'locked': autocaptura apagada, espera el botón
+      fire = armed;
     } else {
       this.state = 'searching';
-      this.stable = 0;
     }
     return {
       species: this.current?.id ?? null, tracked, state: this.state, H: this.H, quality: r.quality,
-      progress: Math.min(1, this.stable / LOCK_TICKS), fire,
+      // Qué tan cerca está de encastrar: la barra se llena a medida que el contorno se alinea, no con el tiempo.
+      progress: this.state === 'cooldown' ? 1 : tracked ? Math.min(1, r.quality / LOCK_Q) : 0, fire,
     };
   }
 
   /** Después de una captura (automática o manual) no vuelve a disparar hasta que saquen la hoja. */
   markCaptured() {
     this.state = 'cooldown';
-    this.stable = 0;
     this.lowSince = 0;
+  }
+
+  /** La ráfaga no encontró frames que sirvan: vuelve a buscar sin esperar a que saquen la hoja. */
+  resume() {
+    this.state = 'searching';
   }
 }

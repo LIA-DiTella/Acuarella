@@ -13,6 +13,13 @@ const MARGIN_MM = 3;      // margen alrededor del pez al encuadrar y recortar
 const ANALYSIS_PX = 960;  // lado mayor del frame que analiza el autoescaneo
 const TICK_MS = 120;
 
+// Ráfaga: al encastrar se toman varios frames seguidos y se combinan los mejores (ver burst()).
+const BURST_FRAMES = 8;   // ~0,27 s a 30 fps
+const BURST_KEEP = 3;     // cuántos de los mejores se combinan
+const ACCEPT_Q = 0.7;     // calidad mínima del ajuste para usar un frame
+const SHARP_KEEP = 0.8;   // solo se combinan frames con al menos esta fracción de la nitidez del más nítido
+const MANUAL_Q = 0.5;     // a mano, con un ajuste peor que esto se recorta con la posición del overlay
+
 const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
 const TEST_STILL = params.get('still') !== '0';
@@ -167,7 +174,7 @@ function renderOverlay() {
 
 /** Contorno que encontró el autoescaneo, proyectado a pantalla (SVG no admite transformaciones proyectivas). */
 function drawTrack(r, f, src) {
-  overlay.dataset.state = r.state;
+  overlay.dataset.state = shownState(r.state);
   const track = $('track');
   if (!track) return;
   if (!r.H || !r.tracked) {
@@ -184,8 +191,10 @@ function drawTrack(r, f, src) {
   track.setAttribute('d', `${d}Z`);
 }
 
+/** 'capturing' se pinta como 'cooldown' (verde): ya encastró, no hay nada que esperar. */
+const shownState = (s) => (s === 'capturing' ? 'cooldown' : s);
+
 function setStatus(r) {
-  const manual = !$('auto').checked && r.state === 'locked';
   let text;
   if (r.state === 'searching') {
     text = state.mode === 'auto'
@@ -193,12 +202,13 @@ function setStatus(r) {
       : `Acercá la hoja de ${state.tpls.get(state.mode).name}`;
   } else {
     const name = state.tpls.get(r.species ?? state.shown).name;
-    text = r.state === 'cooldown' ? `${name} · capturado, poné otra hoja` : `${name} · ${manual ? 'tocá el botón' : 'mantené quieto'}`;
+    text = r.state === 'cooldown' ? `${name} · capturado, poné otra hoja`
+      : r.state === 'capturing' ? `${name} · capturando…`
+      : `${name} · tocá el botón`;  // 'locked': autocaptura apagada
   }
   $('statusText').textContent = text;
-  $('status').dataset.state = r.state;
-  const progress = r.state === 'cooldown' ? 1 : r.state === 'locked' && !manual ? r.progress : 0;
-  $('progress').style.transform = `scaleX(${progress})`;
+  $('status').dataset.state = shownState(r.state);
+  $('progress').style.transform = `scaleX(${$('auto').checked || r.state === 'cooldown' ? r.progress : 0})`;
 }
 
 /** Postura del modo ?test=1: la hoja simulada queda corrida y girada respecto del overlay. */
@@ -274,7 +284,7 @@ function tick() {
   if (r.tracked) showSpecies(r.species);
   drawTrack(r, f, src);
   setStatus(r);
-  if (r.fire) shoot(r.H, r.species);
+  if (r.fire) burst(r.H, r.species);
 }
 
 // --- Captura
@@ -282,23 +292,66 @@ function tick() {
 const fullCanvas = document.createElement('canvas');
 const fctx = fullCanvas.getContext('2d', { willReadFrequently: true });
 
-/**
- * Toma el frame a resolución completa, vuelve a refinar la homografía de la especie sobre ese mismo frame (la mano
- * se mueve entre ticks) y recorta el pez. Si no encuentra el trazo, usa la posición del overlay.
- */
-function captureFrame(hint, id) {
-  const src = source();
-  fullCanvas.width = src.w;
-  fullCanvas.height = src.h;
-  fctx.drawImage(src.el, 0, 0, src.w, src.h);
-  const frame = fctx.getImageData(0, 0, src.w, src.h);
+// Ráfaga: apenas el contorno encastra se toman BURST_FRAMES frames seguidos, al ritmo de la cámara. Cada uno se
+// vuelve a ajustar por separado, así que si la mano se movió entre frames cada ajuste sigue a su frame. Se descartan
+// los movidos y los mal ajustados, y los mejores se rectifican a la plantilla, donde ya quedan alineados entre sí:
+// la mediana píxel a píxel saca reflejos y ruido sin borronear el dibujo.
 
-  const f = grayFrame(fullCanvas, src.w, src.h);
+/** Espera el próximo frame de la cámara (requestVideoFrameCallback cuando existe; si no, el próximo cuadro). */
+function nextFrame() {
+  return new Promise((resolve) => {
+    if (!TEST && video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => resolve());
+    else requestAnimationFrame(() => resolve());
+  });
+}
+
+async function grabFrames(n) {
+  const shots = [];
+  for (let i = 0; i < n; i++) {
+    await nextFrame();
+    if (TEST) drawTestFrame();  // en modo prueba cada frame se redibuja, con el temblor de &still=0
+    shots.push(await createImageBitmap(source().el));
+  }
+  return shots;
+}
+
+/** Nitidez: energía del laplaciano dentro del recuadro del pez. Un frame movido da bastante menos que uno quieto. */
+function sharpness(f, H, b) {
+  const pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]].map(([x, y]) => hApply(H, x, y));
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x0 = Math.max(1, Math.floor(Math.min(...xs))), x1 = Math.min(f.w - 2, Math.ceil(Math.max(...xs)));
+  const y0 = Math.max(1, Math.floor(Math.min(...ys))), y1 = Math.min(f.h - 2, Math.ceil(Math.max(...ys)));
+  const g = f.gray, w = f.w;
+  let sum = 0, n = 0;
+  for (let y = y0; y <= y1; y += 2) {
+    for (let x = x0; x <= x1; x += 2) {
+      const i = y * w + x;
+      const lap = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - w] - g[i + w];
+      sum += lap * lap;
+      n++;
+    }
+  }
+  return n ? sum / n : 0;
+}
+
+/** Ajusta la especie sobre un frame de la ráfaga (desde el ajuste anterior) y mide su nitidez. */
+function analyzeShot(bitmap, hint, id) {
+  const src = { w: bitmap.width, h: bitmap.height };
+  const f = grayFrame(bitmap, src.w, src.h);
   const overlayH = analysisFromTpl(f, src);
-  const scanner = state.scanner.get(id);
-  const refined = scanner.refine(f.gray, f.w, f.h, hint ?? overlayH, hint ? SEARCH_FROM_PREVIOUS : SEARCH_FROM_OVERLAY, overlayH);
-  const H = refined.H && refined.quality >= 0.5 ? refined.H : overlayH;
-  return warpCapture(frame, hMul([src.w / f.w, 0, 0, 0, src.h / f.h, 0, 0, 0, 1], H), state.tpls.get(id));
+  const r = state.scanner.get(id).refine(f.gray, f.w, f.h, hint ?? overlayH,
+    hint ? SEARCH_FROM_PREVIOUS : SEARCH_FROM_OVERLAY, overlayH);
+  return { bitmap, f, overlayH, H: r.H, quality: r.quality, sharp: sharpness(f, r.H ?? overlayH, state.tpls.get(id).bbox) };
+}
+
+/** Frames bien ajustados y casi tan nítidos como el mejor, ordenados por calidad; como máximo BURST_KEEP. */
+function pickShots(shots) {
+  const good = shots.filter((s) => s.H && s.quality >= ACCEPT_Q);
+  if (!good.length) return [];
+  const sharpest = Math.max(...good.map((s) => s.sharp));
+  return good.filter((s) => s.sharp >= SHARP_KEEP * sharpest)
+    .sort((a, b) => b.quality - a.quality || b.sharp - a.sharp)
+    .slice(0, BURST_KEEP);
 }
 
 function maskFor(tpl, w, h, outFromTpl) {
@@ -319,7 +372,7 @@ function maskFor(tpl, w, h, outFromTpl) {
  * Muestreo inverso: cada píxel de salida → mm → H → frame (bilinear), con alfa de la silueta.
  * Fuera del pez (el margen de la región) no se guarda nada, pero se muestrea para medir el color del papel.
  */
-function warpCapture(frame, Hv, tpl) {
+function warpPixels(frame, Hv, tpl) {
   const r = region(tpl), k = OUT_W / r.w;
   const w = OUT_W, h = Math.round(r.h * k);
   const mask = maskFor(tpl, w, h, [k, 0, 0, k, -k * r.x, -k * r.y]);
@@ -352,11 +405,39 @@ function warpCapture(frame, Hv, tpl) {
       }
     }
   }
+  return { out, mask, paper };
+}
+
+/** Rectifica cada frame elegido a la plantilla y los combina píxel a píxel: mediana con tres, promedio con dos. */
+function combine(chosen, tpl) {
+  const warps = chosen.map((s) => {
+    fullCanvas.width = s.bitmap.width;
+    fullCanvas.height = s.bitmap.height;
+    fctx.drawImage(s.bitmap, 0, 0);
+    const frame = fctx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
+    return warpPixels(frame, hMul([frame.width / s.f.w, 0, 0, 0, frame.height / s.f.h, 0, 0, 0, 1], s.H), tpl);
+  });
+  const { out, mask, paper } = warps[0];  // el mejor frame: también da el color del papel
+  const o = out.data, others = warps.slice(1).map((wp) => wp.out.data);
+  if (others.length) {
+    for (let i = 0; i < o.length; i += 4) {
+      if (!mask[i + 3]) continue;
+      for (let c = i; c < i + 3; c++) {
+        const a = o[c], b = others[0][c];
+        if (others.length === 1) {
+          o[c] = (a + b + 1) >> 1;
+        } else {
+          const lo = Math.min(a, b), hi = Math.max(a, b);
+          o[c] = Math.max(lo, Math.min(hi, others[1][c]));
+        }
+      }
+    }
+  }
   if ($('whiten').checked) normalizePaper(o, mask, paperWhite(paper));
 
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = out.width;
+  canvas.height = out.height;
   canvas.getContext('2d').putImageData(out, 0, 0);
   return canvas;
 }
@@ -404,20 +485,49 @@ function normalizePaper(d, mask, white) {
   }
 }
 
-async function shoot(hint, id) {
+/**
+ * Toma la ráfaga, ajusta la especie en cada frame, se queda con los buenos y los combina.
+ * Con autocaptura, si ningún frame sirve no captura y vuelve a buscar; a mano siempre captura algo.
+ */
+async function burst(hint, id, manual = false) {
   if (state.busy || !state.scanner || !id || !source().w) return;
   state.busy = true;
+  const tpl = state.tpls.get(id), t0 = performance.now();
+  setStatus({ state: 'capturing', species: id, progress: 1 });
+  let shots = [];
   try {
+    shots = await grabFrames(BURST_FRAMES);
+    const analyzed = [];
+    let from = hint;
+    for (const bitmap of shots) {
+      const a = analyzeShot(bitmap, from, id);
+      if (a.H && a.quality >= ACCEPT_Q) from = a.H;  // el frame siguiente arranca del ajuste de este
+      analyzed.push(a);
+    }
+    let chosen = pickShots(analyzed);
+    if (!chosen.length && manual) {
+      const best = analyzed.reduce((a, b) => (b.sharp > a.sharp ? b : a));
+      chosen = [{ ...best, H: best.H && best.quality >= MANUAL_Q ? best.H : best.overlayH }];
+    }
+    state.lastBurst = {
+      frames: analyzed.length, used: chosen.length,
+      quality: analyzed.map((a) => +a.quality.toFixed(2)), sharp: analyzed.map((a) => Math.round(a.sharp)),
+    };
+    if (!chosen.length) {
+      state.scanner.resume();
+      return;
+    }
     $('flash').classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
-    const canvas = captureFrame(hint, id);
+    const canvas = combine(chosen, tpl);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    state.lastBurst.ms = Math.round(performance.now() - t0);
     state.scanner.markCaptured();
     if (state.entry) URL.revokeObjectURL(state.entry.url);
-    const tpl = state.tpls.get(id);
     state.entry = { blob, id, species: TEST ? 'test' : id, name: tpl.name, job: {}, url: URL.createObjectURL(blob) };
     onCapture(state.entry);
   } finally {
+    for (const bitmap of shots) bitmap.close();
     state.busy = false;
   }
 }
@@ -512,7 +622,7 @@ $('shutter').onclick = () => {
   const sc = state.scanner;
   if (!sc) return;
   const tracked = sc.current && sc.H && sc.quality >= 0.5;
-  shoot(tracked ? sc.H : null, tracked ? sc.current.id : state.mode === 'auto' ? state.shown : state.mode);
+  burst(tracked ? sc.H : null, tracked ? sc.current.id : state.mode === 'auto' ? state.shown : state.mode, true);
 };
 $('cardImg').onclick = () => state.entry && showResult(state.entry);
 $('cardRetry').onclick = () => state.entry && upload(state.entry);
