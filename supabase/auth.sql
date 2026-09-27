@@ -50,18 +50,43 @@ drop function if exists public.admin_delete_fish(bigint, text);
 drop function if exists public.admin_list_fish();
 
 create or replace function public.admin_list_fish()
-returns table (id bigint, species text, filename text, created_at timestamptz,
-               permanent boolean, active boolean, hidden boolean)
+returns table (id bigint, species text, filename text, created_at timestamptz, permanent boolean, active boolean,
+               hidden boolean, uploaded boolean, moderacion text, texto text, motivo text)
 language plpgsql security definer set search_path = public as $$
 begin
   if not public.is_operator('admin') then
     raise exception 'Sin permiso';
   end if;
+  -- Los rechazados no tienen imagen, pero se listan para ver qué se bloqueó y por qué.
   return query
-    select f.id, f.species, f.filename, f.created_at, f.permanent, f.active, f.hidden
+    select f.id, f.species, f.filename, f.created_at, f.permanent, f.active, f.hidden, f.uploaded,
+           f.moderacion, f.texto, f.motivo
     from public.fish f
-    where f.uploaded
+    where f.uploaded or f.moderacion = 'rechazado'
     order by f.id desc;
+end $$;
+
+-- Decide a mano un pez que la IA mandó a revisión. Aprobado entra al acuario al instante.
+create or replace function public.admin_moderar(p_id bigint, p_aprobar boolean)
+returns public.fish
+language plpgsql security definer set search_path = public as $$
+declare
+  r public.fish;
+begin
+  if not public.is_operator('admin') then
+    raise exception 'Sin permiso';
+  end if;
+  update public.fish set
+    moderacion = case when p_aprobar then 'aprobado' else 'rechazado' end,
+    active = p_aprobar and uploaded,
+    hidden = false,
+    activated_at = case when p_aprobar then now() else activated_at end
+  where id = p_id
+  returning * into r;
+  if r.id is null then
+    raise exception 'No existe el pez %', p_id;
+  end if;
+  return r;
 end $$;
 
 -- Muestra u oculta un pez desde el panel.
@@ -76,6 +101,10 @@ declare
 begin
   if not public.is_operator('admin') then
     raise exception 'Sin permiso';
+  end if;
+
+  if p_visible and exists (select 1 from public.fish where id = p_id and moderacion <> 'aprobado') then
+    raise exception 'Primero hay que aprobarlo';
   end if;
 
   update public.fish set
@@ -126,6 +155,18 @@ revoke all on function public.admin_set_visible(bigint, boolean) from public, an
 grant execute on function public.admin_list_fish() to authenticated;
 grant execute on function public.admin_delete_fish(bigint) to authenticated;
 grant execute on function public.admin_set_visible(bigint, boolean) to authenticated;
+revoke all on function public.admin_moderar(bigint, boolean) from public, anon;
+grant execute on function public.admin_moderar(bigint, boolean) to authenticated;
+
+-- El panel borra también la imagen, no solo la fila (Storage pide ver y borrar).
+drop policy if exists "fish: ver (admin)" on storage.objects;
+create policy "fish: ver (admin)" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'fish' and public.is_operator('admin'));
+drop policy if exists "fish: borrar (admin)" on storage.objects;
+create policy "fish: borrar (admin)" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'fish' and public.is_operator('admin'));
 
 -- 3. La cuenta del operador ---------------------------------------------------
 -- Se crea una sola vez con este bloque. La contraseña se guarda hasheada con bcrypt: no queda en claro ni

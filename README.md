@@ -11,7 +11,8 @@ Web: https://lia-ditella.github.io/Acuarella/aquarium.html
 
 1. **Escanear.** Una página web abre la cámara del teléfono, reconoce cuál de las siete especies es la hoja,
    corrige posición, giro y perspectiva, y recorta solo el dibujo.
-2. **Guardar.** El recorte se sube como PNG con transparencia y queda registrado en la base.
+2. **Revisar.** Una IA lee lo escrito y mira el dibujo en uno o dos segundos. Lo apropiado se guarda; lo dudoso
+   queda para revisión en el panel y lo inapropiado no se muestra.
 3. **Nadar.** El acuario incorpora cada pez nuevo al instante y rota los que se muestran, así la escena cambia
    a lo largo del día.
 
@@ -51,6 +52,8 @@ Dibujos de visitantes, tal como los recortó la aplicación:
 - **Supabase** como backend: PostgreSQL con row level security, Storage para los PNG, Auth para el acceso del
   equipo y pg_cron para la rotación de peces.
 - **Python y poppler** en las herramientas que convierten las plantillas impresas en contornos.
+- **Claude (Anthropic)** para moderar cada dibujo, con una lista de temas de actualidad que se arma a diario
+  con titulares de medios argentinos.
 - **WebRTC** para transmitir el acuario a la tele; Supabase Realtime solo coordina la conexión.
 - **GitHub Pages** para publicar el sitio, que es completamente estático.
 

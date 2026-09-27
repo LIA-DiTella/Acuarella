@@ -5,8 +5,7 @@
 
 import { mul, inv, affineToH, hMul, hApply } from './geometry.js';
 import { SpeciesScanner, parsePath, SEARCH_FROM_OVERLAY, SEARCH_FROM_PREVIOUS } from './autoscan.js';
-import { saveScan, isConfigured } from './storage.js';
-import { pedirClave } from './gate.js';
+import { enviarPez, isConfigured } from './storage.js';
 
 const OUT_W = 1600;       // ancho del PNG de salida (px)
 const MARGIN_MM = 3;      // margen alrededor del pez al encuadrar y recortar
@@ -524,7 +523,7 @@ async function burst(hint, id, manual = false) {
     state.lastBurst.ms = Math.round(performance.now() - t0);
     state.scanner.markCaptured();
     if (state.entry) URL.revokeObjectURL(state.entry.url);
-    state.entry = { blob, id, species: TEST ? 'test' : id, name: tpl.name, job: {}, url: URL.createObjectURL(blob) };
+    state.entry = { blob, id, species: TEST ? 'test' : id, name: tpl.name, url: URL.createObjectURL(blob) };
     onCapture(state.entry);
   } finally {
     for (const bitmap of shots) bitmap.close();
@@ -551,14 +550,18 @@ async function upload(entry) {
   };
   if (TEST && !TEST_UPLOAD) return setCard(`${entry.name} · modo prueba, no se sube`);
   if (!isConfigured()) return setCard('Supabase sin configurar · no se sube', 'error');
-  setCard('Subiendo…');
+  setCard('Revisando tu dibujo…');
   try {
-    const row = await saveScan(entry.blob, entry.species, entry.job);
-    entry.filename = row.filename;
-    setCard(`${row.filename} ✓`, 'ok');
+    // Cada escaneo pasa por la moderación con IA (supabase/functions/subir-pez) antes de mostrarse.
+    const r = await enviarPez(entry.blob, entry.species);
+    entry.filename = r.filename;
+    if (r.estado === 'aprobado') setCard('¡Listo! Ya está nadando en el acuario', 'ok');
+    else if (r.estado === 'revisar') setCard('Tu pez quedó en revisión: en un rato puede aparecer', 'ok');
+    else setCard('Este dibujo no se puede mostrar en el acuario', 'error');
   } catch (err) {
     console.error(err);
-    setCard(`No se pudo subir: ${err.message}`, 'error', true);
+    if (err.status === 429) setCard(err.message, 'error');  // límite de subidas por teléfono
+    else setCard(`No se pudo subir: ${err.message}`, 'error', true);
   }
 }
 
@@ -597,11 +600,6 @@ function cameraError(err) {
 
 $('startBtn').onclick = async () => {
   $('error').textContent = '';
-  // La clave se pide recién acá: cualquiera puede abrir el link y mirar la página o ir al acuario.
-  if (!(await pedirClave('Escáner de peces', { bloquear: false }))) {
-    $('error').textContent = 'Clave incorrecta. Pedísela al equipo y tocá Iniciar cámara otra vez.';
-    return;
-  }
   try {
     if (TEST) {
       video.hidden = true;

@@ -19,22 +19,33 @@ on conflict (id) do nothing;
 create table if not exists public.fish (
   id           bigint generated always as identity primary key,
   species      text not null references public.species (id),
-  filename     text unique,                     -- <especie>-<id>.png (lo completa el trigger)
+  filename     text unique,                     -- <especie>-<id>-<azar>.png (lo completa el trigger)
   created_at   timestamptz not null default now(),
   permanent    boolean not null default false,  -- peces del equipo: siempre visibles
   active       boolean not null default false,  -- visitantes: lo maneja la rotación
   uploaded     boolean not null default false,  -- el PNG ya está en Storage
   hidden       boolean not null default false,  -- apagado a mano desde el panel: la rotación no lo vuelve a traer
+  moderacion   text not null default 'aprobado'  -- lo decide la IA al subir (supabase/functions/subir-pez)
+               check (moderacion in ('aprobado', 'revisar', 'rechazado')),
+  texto        text,                            -- lo que la IA leyó escrito en el dibujo
+  motivo       text,                            -- por qué se mandó a revisar o se rechazó
   activated_at timestamptz,
   times_shown  integer not null default 0
 );
 alter table public.fish add column if not exists hidden boolean not null default false;
+alter table public.fish add column if not exists moderacion text not null default 'aprobado';
+alter table public.fish add column if not exists texto text;
+alter table public.fish add column if not exists motivo text;
+do $$ begin
+  alter table public.fish add constraint fish_moderacion_check check (moderacion in ('aprobado', 'revisar', 'rechazado'));
+exception when duplicate_object then null; end $$;
 create index if not exists fish_active_idx on public.fish (active, permanent);
 
 create or replace function public.fish_set_filename() returns trigger
 language plpgsql as $$
 begin
-  new.filename := new.species || '-' || new.id || '.png';
+  -- El sufijo al azar hace que las direcciones de los archivos no se puedan adivinar recorriendo los números.
+  new.filename := new.species || '-' || new.id || '-' || substr(md5(gen_random_uuid()::text), 1, 10) || '.png';
   return new;
 end $$;
 
@@ -65,6 +76,7 @@ create or replace view public.aquarium_fish as
   where f.uploaded
     and f.species <> 'test'
     and not f.hidden
+    and f.moderacion = 'aprobado'
     and (f.permanent or (f.active and c.visitors_enabled));
 
 -- Funciones -------------------------------------------------------------------
@@ -173,7 +185,7 @@ begin
   update public.fish set active = true, activated_at = now(), times_shown = times_shown + 1
   where id in (
     select id from public.fish
-    where not active and not permanent and uploaded and species <> 'test' and not hidden
+    where not active and not permanent and uploaded and species <> 'test' and not hidden and moderacion = 'aprobado'
     order by id = any (v_off), times_shown, random()
     -- limit greatest(c.max_visitors - v_active, 0)
   );

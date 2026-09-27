@@ -1,8 +1,9 @@
-// Panel del acuario: lista los escaneos subidos, los muestra u oculta con el ojo, y permite borrarlos.
-// Todo pasa por la sesión del operador: sin token, las funciones admin_* de Supabase no devuelven ni cambian nada.
+// Panel del acuario: lista los escaneos (primero los que la IA mandó a revisión), los aprueba o rechaza, los muestra
+// u oculta con el ojo, y los borra. Todo pasa por la sesión del operador: sin token, las funciones admin_* de
+// Supabase no devuelven ni cambian nada.
 
 import { pedirClave } from './gate.js';
-import { adminList, adminDelete, adminSetVisible, publicUrl, isConfigured } from './storage.js';
+import { adminList, adminDelete, adminDeleteFile, adminSetVisible, adminModerar, publicUrl, isConfigured } from './storage.js';
 import { normalizarCodigo, codigoValido, secretoValido } from './stream.js';
 import qrcode from './vendor/qrcode/qrcode.mjs';
 
@@ -29,11 +30,12 @@ async function cargar() {
   decir('Cargando…');
   recargar.disabled = true;
   try {
-    filas = await adminList();
+    // Lo que espera una decisión va primero; el resto, del más nuevo al más viejo.
+    filas = (await adminList()).sort((a, b) => (b.moderacion === 'revisar') - (a.moderacion === 'revisar') || b.id - a.id);
     render();
-    const dentro = filas.filter(enElAcuario).length;
-    const ocultos = filas.filter((f) => f.hidden).length;
-    decir(`${filas.length} escaneos · ${dentro} en el acuario · ${ocultos} ocultos`);
+    const cuantos = (cond) => filas.filter(cond).length;
+    decir(`${cuantos(enElAcuario)} en el acuario · ${cuantos((f) => f.moderacion === 'revisar')} en revisión · ` +
+      `${cuantos((f) => f.moderacion === 'rechazado')} rechazados · ${cuantos((f) => f.hidden)} ocultos`);
   } catch (err) {
     decir(`No se pudo listar: ${err.message}`);
   } finally {
@@ -49,14 +51,30 @@ function pintarOjo(boton, f) {
   boton.classList.toggle('apagado', !visible);
 }
 
+function boton(texto, clase, accion) {
+  const b = document.createElement('button');
+  b.className = clase;
+  b.textContent = texto;
+  b.onclick = () => accion(b);
+  return b;
+}
+
 function render() {
   lista.replaceChildren(...filas.map((f) => {
     const item = document.createElement('li');
+    item.className = f.moderacion;
 
-    const img = document.createElement('img');
-    img.src = publicUrl(f.filename);
-    img.alt = f.filename;
-    img.loading = 'lazy';
+    let img;
+    if (f.uploaded) {
+      img = document.createElement('img');
+      img.src = publicUrl(f.filename);
+      img.alt = f.filename;
+      img.loading = 'lazy';
+    } else {
+      img = document.createElement('div');  // los rechazados no guardan imagen
+      img.className = 'sinimagen';
+      img.textContent = 'sin imagen';
+    }
 
     const datos = document.createElement('div');
     datos.className = 'datos';
@@ -66,29 +84,57 @@ function render() {
     nombre.title = f.filename;  // el nombre se recorta con puntos suspensivos; así se ve entero al pasar por encima
     const meta = document.createElement('div');
     meta.className = 'meta';
-    const donde = f.hidden ? 'oculto' : f.active ? 'en el acuario' : 'en espera';
+    const donde = f.moderacion === 'rechazado' ? 'rechazado' : f.moderacion === 'revisar' ? 'en revisión'
+      : f.hidden ? 'oculto' : f.active ? 'en el acuario' : 'en espera';
     meta.textContent = [f.permanent ? 'fijo' : 'visitante', donde, fecha(f.created_at)].join(' · ');
     if (f.permanent) meta.classList.add('fijo');
     if (f.hidden) meta.classList.add('oculto');
     datos.append(nombre, meta);
+    // Lo que leyó la IA y, si no lo aprobó, por qué.
+    if (f.texto || (f.moderacion !== 'aprobado' && f.motivo)) {
+      const detalle = document.createElement('div');
+      detalle.className = 'detalle';
+      if (f.texto) detalle.append(`«${f.texto}» `);
+      if (f.moderacion !== 'aprobado' && f.motivo) {
+        const motivo = document.createElement('span');
+        motivo.className = 'motivo';
+        motivo.textContent = f.motivo;
+        detalle.append(motivo);
+      }
+      datos.append(detalle);
+    }
 
     const acciones = document.createElement('div');
     acciones.className = 'acciones';
-
-    const ojo = document.createElement('button');
-    ojo.className = 'ojo';
-    pintarOjo(ojo, f);
-    ojo.onclick = () => alternar(f, ojo);
-
-    const boton = document.createElement('button');
-    boton.className = 'peligro';
-    boton.textContent = 'Borrar';
-    boton.onclick = () => borrar(f, boton);
-
-    acciones.append(ojo, boton);
+    if (f.moderacion === 'revisar') {
+      acciones.append(boton('Aprobar', 'ok', (b) => decidir(f, true, b)), boton('Rechazar', 'peligro', (b) => decidir(f, false, b)));
+    } else {
+      if (f.moderacion === 'aprobado') {
+        const ojo = document.createElement('button');
+        ojo.className = 'ojo';
+        pintarOjo(ojo, f);
+        ojo.onclick = () => alternar(f, ojo);
+        acciones.append(ojo);
+      }
+      acciones.append(boton('Borrar', 'peligro', (b) => borrar(f, b)));
+    }
     item.append(img, datos, acciones);
     return item;
   }));
+}
+
+/** Aprobar lo suma al acuario al instante; rechazar además borra la imagen. */
+async function decidir(f, aprobar, boton) {
+  boton.disabled = true;
+  try {
+    await adminModerar(f.id, aprobar);
+    if (!aprobar && f.uploaded) await adminDeleteFile(f.filename).catch(() => {});
+    await cargar();
+    decir(aprobar ? `${f.filename} está en el acuario.` : `${f.filename} rechazado.`);
+  } catch (err) {
+    boton.disabled = false;
+    decir(`No se pudo decidir: ${err.message}`);
+  }
 }
 
 async function alternar(f, boton) {
@@ -106,10 +152,11 @@ async function alternar(f, boton) {
 }
 
 async function borrar(f, boton) {
-  if (!confirm(`¿Borrar ${f.filename}?\n\nDesaparece del acuario en la próxima sincronización. El archivo queda en Storage.`)) return;
+  if (!confirm(`¿Borrar ${f.filename}?\n\nSale del acuario en unos segundos y se borra la imagen.`)) return;
   boton.disabled = true;
   try {
     await adminDelete(f.id);
+    if (f.uploaded) await adminDeleteFile(f.filename).catch(() => {});
     filas = filas.filter((x) => x.id !== f.id);
     render();
     decir(`Borrado ${f.filename}.`);
@@ -128,6 +175,7 @@ borrarTodos.onclick = async () => {
   try {
     for (const f of visitantes) {
       await adminDelete(f.id);
+      if (f.uploaded) await adminDeleteFile(f.filename).catch(() => {});
       hechos++;
       decir(`Borrando… ${hechos}/${visitantes.length}`);
     }

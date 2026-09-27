@@ -1,6 +1,6 @@
 // Acceso a Supabase por REST (sin supabase-js, para mantener el sitio sin build).
-// Leer el acuario es anónimo: es la pantalla pública. Subir un escaneo o usar el panel exige el token de la
-// sesión del operador (auth.js); sin él la base responde 401/403, aunque alguien copie la key de config.js.
+// Leer el acuario y mandar un escaneo son anónimos: el escaneo pasa por la función subir-pez, que lo modera antes
+// de guardarlo. El panel exige el token de la sesión del operador (auth.js).
 
 import { SUPABASE_URL, SUPABASE_KEY, BUCKET } from './config.js';
 import { accessToken } from './auth.js';
@@ -43,51 +43,31 @@ const rpc = async (fn, args) => request(`/rest/v1/rpc/${fn}`, {
   body: JSON.stringify(args),
 });
 
-async function withRetry(fn, tries = 3) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const clientError = err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429;
-      if (attempt >= tries || clientError) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
-    }
-  }
-}
-
-async function uploadPng(filename, blob) {
-  try {
-    await request(`/storage/v1/object/${BUCKET}/${filename}`, {
-      method: 'POST',
-      headers: await authHeaders({ 'Content-Type': 'image/png', 'x-upsert': 'false' }),
-      body: blob,
-    });
-  } catch (err) {
-    // Ya estaba subido (p. ej. se perdió la respuesta del intento anterior).
-    if (err.status === 409 || String(err.body?.statusCode) === '409') return;
-    throw err;
-  }
-}
-
 /**
- * Sube un escaneo: crea la fila (que define id y filename `<especie>-<id>.png`), sube el PNG y lo marca
- * como subido, lo que lo activa en el acuario. `job` guarda el avance para reintentar sin duplicar filas.
+ * Escaneo de un visitante: lo manda a la función que lo modera con IA y, si está bien, lo suma al acuario.
+ * Devuelve { estado: 'aprobado' | 'revisar' | 'rechazado', filename? }.
  */
-export async function saveScan(blob, species, job = {}) {
-  job.row ??= await withRetry(() => rpc('create_fish', { p_species: species }));
-  if (!job.uploaded) {
-    await withRetry(() => uploadPng(job.row.filename, blob));
-    job.uploaded = true;
-  }
-  job.row = await withRetry(() => rpc('mark_uploaded', { p_id: job.row.id }));
-  return { ...job.row, url: publicUrl(job.row.filename) };
+export async function enviarPez(blob, especie) {
+  const cuerpo = new FormData();
+  cuerpo.append('especie', especie);
+  cuerpo.append('imagen', blob, 'pez.png');
+  return request('/functions/v1/subir-pez', { method: 'POST', headers: headers(), body: cuerpo });
 }
 
 /** Panel: todos los escaneos subidos, incluidos los que hoy no están en el acuario. Exige sesión. */
 export const adminList = () => rpc('admin_list_fish', {});
 
-/** Panel: borra la fila del escaneo. El PNG queda en Storage (Supabase no deja borrarlo por SQL). */
+/** Panel: borra la fila del escaneo. */
 export const adminDelete = (id) => rpc('admin_delete_fish', { p_id: id });
+
+/** Panel: borra la imagen de Storage (la política solo lo permite a los admins). */
+export const adminDeleteFile = async (filename) => request(`/storage/v1/object/${BUCKET}/${encodeURIComponent(filename)}`, {
+  method: 'DELETE',
+  headers: await authHeaders(),
+});
+
+/** Panel: decide a mano un pez que la IA mandó a revisión. */
+export const adminModerar = (id, aprobar) => rpc('admin_moderar', { p_id: id, p_aprobar: aprobar });
 
 /** Panel: muestra u oculta un pez. Oculto no vuelve solo con la rotación de cada 2 h. */
 export const adminSetVisible = (id, visible) => rpc('admin_set_visible', { p_id: id, p_visible: visible });
