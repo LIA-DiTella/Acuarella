@@ -103,7 +103,7 @@ class PairedSampleBloomPass extends UnrealBloomPass {
 }
 
 /** Crea el arrecife sobre un canvas. Devuelve la escena, los controles y un render(dt). */
-export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 'ultra', onProgress, pan = true } = {}) {
+export async function createReef(canvas, { quality = innerWidth < 700 ? 'eco' : 'ultra', onProgress, pan = true, outputSize = null } = {}) {
   const textureLoader = new THREE.TextureLoader();
   const atlas = textureLoader.load(`${ASSETS}caustics.png`);
   const overhead = textureLoader.load(`${ASSETS}overhead.png`);
@@ -468,7 +468,8 @@ float waterCaustic(vec2 p) {
   renderables.push(...optimizedRenderables);
 
   function resize() {
-    const w = innerWidth, h = innerHeight;
+    // Al transmitir a la tele se dibuja a un tamaño fijo (outputSize), no al de la ventana.
+    const w = outputSize ? outputSize.w : innerWidth, h = outputSize ? outputSize.h : innerHeight;
     camera.aspect = w / h;
     camera.fov = w < 700 ? 76 : 68;
     camera.updateProjectionMatrix();
@@ -483,7 +484,7 @@ float waterCaustic(vec2 p) {
     quality = value === 'low' ? 'eco' : value === 'medium' || value === 'high' ? 'ultra'
       : QUALITY[value] ? value : 'ultra';
     const q = QUALITY[quality];
-    renderer.setPixelRatio(Math.min(devicePixelRatio, q.dpr));
+    renderer.setPixelRatio(outputSize ? 1 : Math.min(devicePixelRatio, q.dpr));
     renderer.shadowMap.enabled = q.shadows;
     renderer.shadowMap.needsUpdate = true;
     const size = quality === 'eco' ? 1024 : 2048;

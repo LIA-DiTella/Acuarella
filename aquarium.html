@@ -31,6 +31,11 @@
     padding: 4px 7px; border-radius: 5px; background: rgba(0, 20, 40, .6); color: #e8f7fb;
     font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none;
   }
+  #emision {
+    position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); left: 50%; transform: translateX(-50%);
+    padding: 6px 10px; border-radius: 6px; background: rgba(0, 20, 40, .75); color: #e8f7fb;
+    font: 12px/1.3 system-ui, -apple-system, sans-serif; pointer-events: none; white-space: nowrap;
+  }
   [hidden] { display: none !important; }
 </style>
 <script type="importmap">
@@ -43,6 +48,7 @@
 <div id="creature-count" aria-label="Cantidad de criaturas">🐟 0</div>
 <div id="fps" aria-label="Cuadros por segundo y calidad gráfica"></div>
 <pre id="debug" hidden></pre>
+<div id="emision" hidden></div>
 <script type="module" src="aquarium.js"></script>
 </body>
 </html>

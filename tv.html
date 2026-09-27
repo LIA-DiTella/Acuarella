@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acuarella · Tele</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐠</text></svg>">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #e8f7fb; cursor: none;
+    font: 20px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #estado { position: fixed; left: 32px; bottom: 24px; color: #8fb3bf; }
+  #emparejar { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; background: #052a3d; }
+  #emparejar p { margin: 8px 24px; color: #8fb3bf; }
+  #codigo { font: 700 96px/1.2 ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #29f0ff; margin: 12px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<video id="video" autoplay muted playsinline></video>
+<div id="estado">Esperando la transmisión…</div>
+<div id="emparejar" hidden>
+  <p>Código de esta tele</p>
+  <div id="codigo"></div>
+  <p>Ingresalo en el panel del acuario, en «Transmitir a la tele». Se muestra solo esta vez.</p>
+</div>
+<script type="module">
+  import { recibir, nuevoCodigo, codigoValido } from './stream.js';
+
+  // La tele guarda su código. Se muestra solo hasta la primera conexión; después, nunca más, así nadie lo puede
+  // copiar mirando la pantalla. tv.html#nuevo genera otro, para volver a emparejar.
+  const GUARDADO = 'acuarella-tele';
+  const leer = () => {
+    try { return JSON.parse(localStorage.getItem(GUARDADO) || 'null'); } catch (e) { return null; }
+  };
+  const guardar = (d) => {
+    try { localStorage.setItem(GUARDADO, JSON.stringify(d)); } catch (e) { /* sin almacenamiento: pide código cada vez */ }
+  };
+
+  let datos = leer();
+  if (location.hash === '#nuevo' || !datos || !codigoValido(datos.codigo)) {
+    datos = { codigo: nuevoCodigo(), emparejada: false };
+    guardar(datos);
+    if (location.hash) history.replaceState(null, '', location.pathname);
+  }
+
+  const emparejar = document.getElementById('emparejar');
+  const estado = document.getElementById('estado');
+  const mostrarCodigo = () => {
+    emparejar.hidden = datos.emparejada;
+    document.getElementById('codigo').textContent = datos.codigo.slice(0, 4) + ' ' + datos.codigo.slice(4);
+  };
+  mostrarCodigo();
+
+  const TEXTOS = {
+    esperando: 'Esperando la transmisión…',
+    conectando: 'Conectando…',
+    conectado: '',
+    reconectando: 'Se cortó la transmisión, reconectando…',
+  };
+  recibir(document.getElementById('video'), datos.codigo, (s) => {
+    if (s === 'conectado' && !datos.emparejada) {
+      datos.emparejada = true;
+      guardar(datos);
+      mostrarCodigo();
+    }
+    estado.textContent = TEXTOS[s];
+    estado.hidden = s === 'conectado';
+  });
+
+  // Con el control remoto, cualquier tecla pasa a pantalla completa.
+  const completa = () => {
+    const el = document.documentElement;
+    const p = el.requestFullscreen ? el.requestFullscreen() : el.webkitRequestFullscreen ? el.webkitRequestFullscreen() : null;
+    if (p && p.catch) p.catch(() => {});
+  };
+  document.addEventListener('click', completa);
+  document.addEventListener('keydown', completa);
+</script>
+</body>
+</html>

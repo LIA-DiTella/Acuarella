@@ -17,6 +17,10 @@ const ROTATE_MS = 2 * 60 * 60 * 1000;  // igual que el cron de supabase/schema.s
 const DEMO_ROTATE_MS = 15000;          // en demo la rotación se acelera para verla
 // ?speed=N acelera el tiempo de las órbitas, para ver el recorrido completo sin esperar.
 const SPEED = Math.min(Math.max(Number(params.get('speed')) || 1, 0.25), 20);
+// ?emitir#código: esta computadora dibuja a tamaño fijo y transmite a la tele (ver stream.js y el panel).
+const EMITIR = params.has('emitir');
+const SALIDAS = { 2160: { w: 3840, h: 2160 }, 1440: { w: 2560, h: 1440 }, 1080: { w: 1920, h: 1080 } };
+const SALIDA = EMITIR ? SALIDAS[params.get('res')] || SALIDAS[2160] : null;
 
 /** Demo: un ejemplar fijo por especie y 2 de 4 pirañas visitantes, rotando cada DEMO_ROTATE_MS. */
 function demoRows() {
@@ -39,6 +43,7 @@ try {
   reef = await createReef(canvas, {
     quality: params.get('quality') ?? undefined,
     pan: params.get('pan') !== '0',
+    outputSize: SALIDA,
     onProgress: (xhr) => { if (xhr.total) progress.style.width = `${Math.round(xhr.loaded / xhr.total * 100)}%`; },
   });
 } catch (err) {
@@ -84,6 +89,26 @@ async function sync() {
 
 await sync();
 setInterval(sync, POLL_MS);
+
+if (EMITIR) iniciarEmision();
+
+async function iniciarEmision() {
+  const aviso = document.getElementById('emision');
+  aviso.hidden = false;
+  const { emitir, codigoValido } = await import('./stream.js');
+  const codigo = location.hash.slice(1);
+  if (!codigoValido(codigo)) {
+    aviso.textContent = 'Falta el código de la tele: abrí el emisor desde el panel.';
+    return;
+  }
+  const fps = Number(params.get('fps')) === 30 ? 30 : 60;
+  const titulo = `Transmitiendo ${SALIDA.w}×${SALIDA.h} a ${fps} fps · dejá esta ventana visible`;
+  aviso.textContent = `${titulo} · esperando a la tele`;
+  emitir(canvas, codigo, {
+    fps,
+    alCambiar: (n) => { aviso.textContent = `${titulo} · ${n ? 'tele conectada' : 'esperando a la tele'}`; },
+  });
+}
 
 addEventListener('keydown', (event) => {
   if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;

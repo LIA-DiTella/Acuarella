@@ -3,6 +3,7 @@
 
 import { pedirClave } from './gate.js';
 import { adminList, adminDelete, adminSetVisible, publicUrl, isConfigured } from './storage.js';
+import { normalizarCodigo, codigoValido } from './stream.js';
 
 if (!await pedirClave('Panel del acuario')) throw new Error('sin clave');
 
@@ -140,3 +141,23 @@ borrarTodos.onclick = async () => {
 
 recargar.onclick = cargar;
 cargar();
+
+// --- Transmitir a la tele (ver stream.js)
+
+const TELE = 'acuarella-tele-codigo';
+const teleCodigo = document.getElementById('teleCodigo');
+document.getElementById('teleDireccion').textContent = new URL('tv.html', location.href).href.replace(/^https?:\/\//, '');
+try {
+  teleCodigo.value = localStorage.getItem(TELE) || '';
+} catch { /* sin almacenamiento: el código se tipea cada vez */ }
+
+document.getElementById('teleEmitir').onclick = () => {
+  const codigo = normalizarCodigo(teleCodigo.value);
+  if (!codigoValido(codigo)) {
+    return decir('El código tiene 8 letras y números: lo muestra la tele la primera vez que abre la dirección.');
+  }
+  try { localStorage.setItem(TELE, codigo); } catch { /* se vuelve a tipear la próxima vez */ }
+  const res = document.getElementById('teleRes').value, fps = document.getElementById('teleFps').value;
+  window.open(`aquarium.html?emitir=1&res=${res}&fps=${fps}#${codigo}`, 'acuarella-emisor');
+  decir('Emisor abierto en otra ventana. Dejala visible: la tele se conecta sola.');
+};

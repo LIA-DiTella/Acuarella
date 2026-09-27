@@ -18,6 +18,12 @@ Web: https://lia-ditella.github.io/Acuarella/aquarium.html
 Un panel aparte permite revisar lo escaneado y sacar del acuario lo que haga falta. Escanear y administrar
 piden contraseña; ver el acuario, no.
 
+## Pantalla
+
+Dibujar el arrecife requiere una computadora con GPU. Para mostrarlo en una tele, esa computadora abre el emisor
+desde el panel y la tele solo reproduce el video en `tv.html`, por la red local. La primera vez, la tele muestra un
+código de 8 caracteres que se ingresa en el panel.
+
 ## Algunos peces
 
 Dibujos de visitantes, tal como los recortó la aplicación:
@@ -45,6 +51,7 @@ Dibujos de visitantes, tal como los recortó la aplicación:
 - **Supabase** como backend: PostgreSQL con row level security, Storage para los PNG, Auth para el acceso del
   equipo y pg_cron para la rotación de peces.
 - **Python y poppler** en las herramientas que convierten las plantillas impresas en contornos.
+- **WebRTC** para transmitir el acuario a la tele; Supabase Realtime solo coordina la conexión.
 - **GitHub Pages** para publicar el sitio, que es completamente estático.
 
 

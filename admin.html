@@ -39,6 +39,15 @@
   .nombre { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .meta { color: #8fb3bf; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fijo { color: #ffd23f; }
+  .tele { margin: 0 0 20px; padding: 14px 14px 4px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 12px; }
+  .tele h2 { margin: 0 0 4px; font-size: 16px; }
+  .tele .sub { margin-bottom: 12px; }
+  .tele code { color: #29f0ff; overflow-wrap: anywhere; }
+  input, select {
+    border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .08); color: inherit;
+    border-radius: 10px; padding: 9px 12px; font: inherit;
+  }
+  #teleCodigo { width: 11em; font-family: ui-monospace, Menlo, monospace; letter-spacing: .06em; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -55,6 +64,24 @@
   <button id="borrarTodos" class="peligro">Borrar todos los visitantes</button>
   <span id="estado"></span>
 </div>
+
+<section class="tele">
+  <h2>Transmitir a la tele</h2>
+  <p class="sub">Esta computadora dibuja el acuario y lo manda por la red local; la tele solo reproduce el video. En el navegador de la tele abrí <code id="teleDireccion"></code>: la primera vez muestra un código de 8 caracteres, que va acá. La ventana del emisor tiene que quedar abierta y visible, porque minimizada el navegador la frena.</p>
+  <div class="barra">
+    <input id="teleCodigo" placeholder="Código de la tele" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <select id="teleRes" aria-label="Resolución">
+      <option value="2160">4K</option>
+      <option value="1440">1440p</option>
+      <option value="1080">1080p</option>
+    </select>
+    <select id="teleFps" aria-label="Cuadros por segundo">
+      <option value="60">60 fps</option>
+      <option value="30">30 fps</option>
+    </select>
+    <button id="teleEmitir">Abrir emisor</button>
+  </div>
+</section>
 
 <ul id="lista"></ul>
 
