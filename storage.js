@@ -43,15 +43,22 @@ const rpc = async (fn, args) => request(`/rest/v1/rpc/${fn}`, {
   body: JSON.stringify(args),
 });
 
+/** ¿El escáner está abierto al público? Si no, pide la clave del equipo (interruptor del panel). */
+export const escanerPublico = () => request('/rest/v1/rpc/escaner_publico', {
+  method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: '{}',
+});
+
 /**
- * Escaneo de un visitante: lo manda a la función que lo modera con IA y, si está bien, lo suma al acuario.
- * Devuelve { estado: 'aprobado' | 'revisar' | 'rechazado', filename? }.
+ * Escaneo: lo manda a la función que lo modera con IA y, si está bien, lo suma al acuario. Con el escáner cerrado
+ * al público va con la sesión del equipo (`conSesion`). Devuelve { estado: 'aprobado' | 'revisar' | 'rechazado' }.
  */
-export async function enviarPez(blob, especie) {
+export async function enviarPez(blob, especie, conSesion = false) {
   const cuerpo = new FormData();
   cuerpo.append('especie', especie);
   cuerpo.append('imagen', blob, 'pez.png');
-  return request('/functions/v1/subir-pez', { method: 'POST', headers: headers(), body: cuerpo });
+  return request('/functions/v1/subir-pez', {
+    method: 'POST', headers: conSesion ? await authHeaders() : headers(), body: cuerpo,
+  });
 }
 
 /** Panel: todos los escaneos subidos, incluidos los que hoy no están en el acuario. Exige sesión. */
@@ -65,6 +72,9 @@ export const adminDeleteFile = async (filename) => request(`/storage/v1/object/$
   method: 'DELETE',
   headers: await authHeaders(),
 });
+
+/** Panel: abre o cierra el escáner al público. */
+export const adminSetEscanerPublico = (publico) => rpc('admin_set_escaner_publico', { p_publico: publico });
 
 /** Panel: decide a mano un pez que la IA mandó a revisión. */
 export const adminModerar = (id, aprobar) => rpc('admin_moderar', { p_id: id, p_aprobar: aprobar });

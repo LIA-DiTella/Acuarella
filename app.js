@@ -5,7 +5,8 @@
 
 import { mul, inv, affineToH, hMul, hApply } from './geometry.js';
 import { SpeciesScanner, parsePath, SEARCH_FROM_OVERLAY, SEARCH_FROM_PREVIOUS } from './autoscan.js';
-import { enviarPez, isConfigured } from './storage.js';
+import { enviarPez, escanerPublico, isConfigured } from './storage.js';
+import { pedirClave } from './gate.js';
 
 const OUT_W = 1600;       // ancho del PNG de salida (px)
 const MARGIN_MM = 3;      // margen alrededor del pez al encuadrar y recortar
@@ -553,7 +554,7 @@ async function upload(entry) {
   setCard('Revisando tu dibujo…');
   try {
     // Cada escaneo pasa por la moderación con IA (supabase/functions/subir-pez) antes de mostrarse.
-    const r = await enviarPez(entry.blob, entry.species);
+    const r = await enviarPez(entry.blob, entry.species, !state.publico);
     entry.filename = r.filename;
     if (r.estado === 'aprobado') setCard('¡Listo! Ya está nadando en el acuario', 'ok');
     else if (r.estado === 'revisar') setCard('Tu pez quedó en revisión: en un rato puede aparecer', 'ok');
@@ -600,6 +601,12 @@ function cameraError(err) {
 
 $('startBtn').onclick = async () => {
   $('error').textContent = '';
+  // Mientras el escáner no esté abierto al público (interruptor del panel), pide la clave del equipo.
+  state.publico = await escanerPublico().catch(() => false);
+  if (!state.publico && !(await pedirClave('Escáner de peces', { bloquear: false }))) {
+    $('error').textContent = 'Clave incorrecta. Pedísela al equipo y tocá Iniciar cámara otra vez.';
+    return;
+  }
   try {
     if (TEST) {
       video.hidden = true;

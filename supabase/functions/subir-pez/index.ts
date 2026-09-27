@@ -116,6 +116,16 @@ function controlFijo(v: Veredicto): Veredicto {
     motivo: `Le habla a la moderación: ${v.motivo}` };
 }
 
+/** ¿El pedido trae la sesión de una cuenta del equipo (tabla operators)? */
+async function esOperador(req: Request): Promise<boolean> {
+  const jwt = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (!jwt || jwt.startsWith('sb_')) return false;  // la publishable key no es una sesión
+  const { data } = await db.auth.getUser(jwt);
+  if (!data?.user) return false;
+  const { data: fila } = await db.from('operators').select('user_id').eq('user_id', data.user.id).maybeSingle();
+  return Boolean(fila);
+}
+
 const esPng = (b: Uint8Array) => b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
 
 Deno.serve(async (req) => {
@@ -123,16 +133,8 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return responder({ error: 'Método no permitido' }, 405);
   const t0 = Date.now();
 
-  // Límite por teléfono (IP)
-  const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'desconocida';
-  const desde = new Date(Date.now() - LIMITE_MINUTOS * 60_000).toISOString();
-  const { count } = await db.from('subidas').select('*', { count: 'exact', head: true }).eq('ip', ip).gte('creado', desde);
-  if ((count ?? 0) >= LIMITE_SUBIDAS) {
-    return responder({ error: 'Subiste muchos peces seguidos. Probá de nuevo en unos minutos.' }, 429);
-  }
-  await db.from('subidas').insert({ ip });
-
-  // Validación
+  // Se lee el pedido completo antes de cualquier respuesta: contestar sin consumir el cuerpo deja la
+  // conexión colgada mientras el teléfono sigue mandando la imagen.
   let especie = '', png: Uint8Array;
   try {
     const form = await req.formData();
@@ -144,6 +146,22 @@ Deno.serve(async (req) => {
   } catch {
     return responder({ error: 'Imagen inválida' }, 400);
   }
+
+  // Con el escáner cerrado al público (interruptor del panel) solo suben las cuentas del equipo.
+  const [{ data: publico }, operador] = await Promise.all([db.rpc('escaner_publico'), esOperador(req)]);
+  if (!publico && !operador) return responder({ error: 'El escáner todavía no está abierto al público.' }, 401);
+
+  // Límite por teléfono (IP); el equipo no tiene límite
+  if (!operador) {
+    const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'desconocida';
+    const desde = new Date(Date.now() - LIMITE_MINUTOS * 60_000).toISOString();
+    const { count } = await db.from('subidas').select('*', { count: 'exact', head: true }).eq('ip', ip).gte('creado', desde);
+    if ((count ?? 0) >= LIMITE_SUBIDAS) {
+      return responder({ error: 'Subiste muchos peces seguidos. Probá de nuevo en unos minutos.' }, 429);
+    }
+    await db.from('subidas').insert({ ip });
+  }
+
   const { data: sp } = await db.from('species').select('id').eq('id', especie).eq('enabled', true).maybeSingle();
   if (!sp) return responder({ error: 'Especie desconocida' }, 400);
 

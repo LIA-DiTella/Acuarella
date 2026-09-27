@@ -46,3 +46,26 @@ $$);
 select cron.schedule('limpiar-subidas', '30 12 * * *', $$
   delete from public.subidas where creado < now() - interval '1 day'
 $$);
+
+-- Interruptor del escáner público ----------------------------------------------
+-- Apagado: el escáner pide la clave del equipo y la función subir-pez solo acepta operadores.
+-- Encendido: cualquiera escanea con su teléfono (todo pasa igual por la moderación con IA).
+alter table public.aquarium_config add column if not exists escaner_publico boolean not null default false;
+
+create or replace function public.escaner_publico() returns boolean
+language sql stable security definer set search_path = public as $$
+  select escaner_publico from public.aquarium_config
+$$;
+grant execute on function public.escaner_publico() to anon, authenticated;
+
+create or replace function public.admin_set_escaner_publico(p_publico boolean) returns boolean
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_operator('admin') then
+    raise exception 'Sin permiso';
+  end if;
+  update public.aquarium_config set escaner_publico = p_publico;
+  return p_publico;
+end $$;
+revoke all on function public.admin_set_escaner_publico(boolean) from public, anon;
+grant execute on function public.admin_set_escaner_publico(boolean) to authenticated;

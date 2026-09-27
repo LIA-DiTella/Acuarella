@@ -3,7 +3,10 @@
 // Supabase no devuelven ni cambian nada.
 
 import { pedirClave } from './gate.js';
-import { adminList, adminDelete, adminDeleteFile, adminSetVisible, adminModerar, publicUrl, isConfigured } from './storage.js';
+import {
+  adminList, adminDelete, adminDeleteFile, adminSetVisible, adminModerar, adminSetEscanerPublico, escanerPublico,
+  publicUrl, isConfigured,
+} from './storage.js';
 import { normalizarCodigo, codigoValido, secretoValido } from './stream.js';
 import qrcode from './vendor/qrcode/qrcode.mjs';
 
@@ -190,6 +193,38 @@ borrarTodos.onclick = async () => {
 
 recargar.onclick = cargar;
 cargar();
+
+// --- Escáner público: apagado pide la clave del equipo; encendido, cualquiera escanea (siempre con moderación)
+
+const publicoEstado = document.getElementById('publicoEstado');
+const publicoBoton = document.getElementById('publicoBoton');
+let publico = false;
+
+function pintarPublico() {
+  publicoEstado.textContent = publico
+    ? 'Escáner abierto: cualquiera escanea desde su teléfono.'
+    : 'Escáner cerrado: pide la clave del equipo.';
+  publicoBoton.textContent = publico ? 'Cerrar al público' : 'Abrir al público';
+  publicoBoton.className = publico ? 'peligro' : 'ok';
+  publicoBoton.hidden = false;
+}
+
+escanerPublico().then((v) => { publico = v === true; pintarPublico(); })
+  .catch(() => { publicoEstado.textContent = 'No se pudo leer el estado del escáner.'; });
+
+publicoBoton.onclick = async () => {
+  if (!publico && !confirm('¿Abrir el escáner al público?\n\nCualquiera con el link va a poder escanear; cada dibujo pasa por la moderación con IA.')) return;
+  publicoBoton.disabled = true;
+  try {
+    publico = (await adminSetEscanerPublico(!publico)) === true;
+    pintarPublico();
+    decir(publico ? 'Escáner abierto al público.' : 'Escáner cerrado: vuelve a pedir la clave.');
+  } catch (err) {
+    decir(`No se pudo cambiar: ${err.message}`);
+  } finally {
+    publicoBoton.disabled = false;
+  }
+};
 
 // --- Transmitir a la tele (ver stream.js)
 
