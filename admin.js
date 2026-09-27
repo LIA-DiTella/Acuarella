@@ -3,7 +3,8 @@
 
 import { pedirClave } from './gate.js';
 import { adminList, adminDelete, adminSetVisible, publicUrl, isConfigured } from './storage.js';
-import { normalizarCodigo, codigoValido } from './stream.js';
+import { normalizarCodigo, codigoValido, secretoValido } from './stream.js';
+import qrcode from './vendor/qrcode/qrcode.mjs';
 
 if (!await pedirClave('Panel del acuario')) throw new Error('sin clave');
 
@@ -144,20 +145,39 @@ cargar();
 
 // --- Transmitir a la tele (ver stream.js)
 
-const TELE = 'acuarella-tele-codigo';
+// El emisor guarda acá el secreto de la transmisión (mismo origen): con él, las teles ya emparejadas se conectan
+// solas y el código de 3 cifras solo hace falta para sumar una tele nueva.
+const SECRETO = 'acuarella-tele-secreto';
 const teleCodigo = document.getElementById('teleCodigo');
-document.getElementById('teleDireccion').textContent = new URL('tv.html', location.href).href.replace(/^https?:\/\//, '');
-try {
-  teleCodigo.value = localStorage.getItem(TELE) || '';
-} catch { /* sin almacenamiento: el código se tipea cada vez */ }
+const urlTele = new URL('tv.html', location.href).href;
+const direccion = document.getElementById('teleDireccion');
+direccion.href = urlTele;
+direccion.textContent = urlTele.replace(/^https?:\/\//, '');
+// QR chico para abrir la página de la tele desde un celular (para probar) sin tipear la dirección.
+const qr = qrcode(0, 'M');
+qr.addData(urlTele);
+qr.make();
+const teleQr = document.getElementById('teleQr');
+teleQr.href = urlTele;
+teleQr.innerHTML = qr.createSvgTag({ cellSize: 3, alt: 'QR de la página de la tele' });
+const secretoGuardado = () => {
+  try { return localStorage.getItem(SECRETO) || ''; } catch { return ''; }
+};
+if (secretoValido(secretoGuardado())) teleCodigo.placeholder = 'Código (opcional)';
 
 document.getElementById('teleEmitir').onclick = () => {
   const codigo = normalizarCodigo(teleCodigo.value);
-  if (!codigoValido(codigo)) {
-    return decir('El código tiene 8 letras y números: lo muestra la tele la primera vez que abre la dirección.');
+  let destino;
+  if (codigo) {
+    if (!codigoValido(codigo)) return decir('El código de la tele son 3 cifras.');
+    destino = `par-${codigo}`;
+  } else if (secretoValido(secretoGuardado())) {
+    destino = secretoGuardado();
+  } else {
+    return decir('Escribí el código de 3 cifras que muestra la tele.');
   }
-  try { localStorage.setItem(TELE, codigo); } catch { /* se vuelve a tipear la próxima vez */ }
   const res = document.getElementById('teleRes').value, fps = document.getElementById('teleFps').value;
-  window.open(`aquarium.html?emitir=1&res=${res}&fps=${fps}#${codigo}`, 'acuarella-emisor');
+  window.open(`aquarium.html?emitir=1&res=${res}&fps=${fps}#${destino}`, 'acuarella-emisor');
+  teleCodigo.value = '';
   decir('Emisor abierto en otra ventana. Dejala visible: la tele se conecta sola.');
 };

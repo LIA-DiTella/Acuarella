@@ -41,13 +41,16 @@
   .fijo { color: #ffd23f; }
   .tele { margin: 0 0 20px; padding: 14px 14px 4px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 12px; }
   .tele h2 { margin: 0 0 4px; font-size: 16px; }
-  .tele .sub { margin-bottom: 12px; }
+  .tele .sub { margin: 0 0 8px; }
+  .tele-fila { display: flex; gap: 14px; align-items: flex-start; }
+  .qr { flex: none; line-height: 0; }
+  .qr svg { display: block; border-radius: 6px; }
   .tele code { color: #29f0ff; overflow-wrap: anywhere; }
   input, select {
     border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .08); color: inherit;
     border-radius: 10px; padding: 9px 12px; font: inherit;
   }
-  #teleCodigo { width: 11em; font-family: ui-monospace, Menlo, monospace; letter-spacing: .06em; }
+  #teleCodigo { width: 14em; font-family: ui-monospace, Menlo, monospace; letter-spacing: .1em; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -67,10 +70,13 @@
 
 <section class="tele">
   <h2>Transmitir a la tele</h2>
-  <p class="sub">Esta computadora dibuja el acuario y lo manda por la red local; la tele solo reproduce el video. En el navegador de la tele abrí <code id="teleDireccion"></code>: la primera vez muestra un código de 8 caracteres, que va acá. La ventana del emisor tiene que quedar abierta y visible, porque minimizada el navegador la frena.</p>
-  <p class="sub"><strong>Una sola vez, en esta computadora:</strong> la tele y la computadora tienen que estar en la misma red Wi-Fi, y Chrome no tiene que ocultar la IP local. Abrí <code>chrome://flags</code>, buscá <code>Anonymize local IPs exposed by WebRTC</code>, ponelo en <code>Disabled</code> y reiniciá Chrome. Si no aparece: cerrá Chrome del todo y abrilo desde la Terminal con <code>open -a "Google Chrome" --args --disable-features=WebRtcHideLocalIpsWithMdns</code>.</p>
+  <div class="tele-fila">
+    <a id="teleQr" class="qr" target="_blank" rel="noopener" title="Abrir la página de la tele"></a>
+    <div>
+      <p class="sub">En la tele abrí <a id="teleDireccion" target="_blank" rel="noopener"></a> y poné acá el código.</p>
+      <p class="sub">Chrome: desactivá <code>Anonymize local IPs exposed by WebRTC</code> en <code>chrome://flags</code>.</p>
   <div class="barra">
-    <input id="teleCodigo" placeholder="Código de la tele" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input id="teleCodigo" placeholder="Código" inputmode="numeric" maxlength="3" autocomplete="off">
     <select id="teleRes" aria-label="Resolución">
       <option value="2160">4K</option>
       <option value="1440">1440p</option>
@@ -81,6 +87,8 @@
       <option value="30">30 fps</option>
     </select>
     <button id="teleEmitir">Abrir emisor</button>
+  </div>
+    </div>
   </div>
 </section>
 

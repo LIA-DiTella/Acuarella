@@ -22,7 +22,7 @@ piden contraseña; ver el acuario, no.
 
 Dibujar el arrecife requiere una computadora con GPU. Para mostrarlo en una tele, esa computadora abre el emisor
 desde el panel y la tele solo reproduce el video en `tv.html`, por la red local. La primera vez, la tele muestra un
-código de 8 caracteres que se ingresa en el panel.
+código de 3 cifras que se ingresa en el panel.
 
 ## Algunos peces
 

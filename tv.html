@@ -9,49 +9,38 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #e8f7fb; cursor: none;
     font: 20px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-  #estado { position: fixed; left: 32px; bottom: 24px; color: #8fb3bf; }
+  #estado { position: fixed; left: 32px; right: 32px; bottom: 24px; color: #8fb3bf; }
   #emparejar { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column;
     align-items: center; justify-content: center; text-align: center; background: #052a3d; }
   #emparejar p { margin: 8px 24px; color: #8fb3bf; }
-  #codigo { font: 700 96px/1.2 ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #29f0ff; margin: 12px 0; }
+  #codigo { font: 700 160px/1.1 ui-monospace, Menlo, monospace; letter-spacing: .12em; color: #29f0ff; margin: 12px 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <video id="video" autoplay muted playsinline></video>
-<div id="estado">Esperando la transmisión…</div>
+<div id="estado" hidden></div>
 <div id="emparejar" hidden>
   <p>Código de esta tele</p>
   <div id="codigo"></div>
-  <p>Ingresalo en el panel del acuario, en «Transmitir a la tele». Se muestra solo esta vez.</p>
+  <p>Ingresalo en el panel del acuario, en «Transmitir a la tele».</p>
 </div>
 <script type="module">
-  import { recibir, nuevoCodigo, codigoValido } from './stream.js';
+  import { recibir, esperarEmparejamiento, nuevoCodigo, secretoValido } from './stream.js';
 
-  // La tele guarda su código. Se muestra solo hasta la primera conexión; después, nunca más, así nadie lo puede
-  // copiar mirando la pantalla. tv.html#nuevo genera otro, para volver a emparejar.
+  // La tele se empareja una vez: muestra un código de 3 cifras y el emisor le manda un secreto largo, que guarda.
+  // Con el secreto guardado no vuelve a mostrar ningún código. tv.html#nuevo la desempareja.
   const GUARDADO = 'acuarella-tele';
   const leer = () => {
     try { return JSON.parse(localStorage.getItem(GUARDADO) || 'null'); } catch (e) { return null; }
   };
   const guardar = (d) => {
-    try { localStorage.setItem(GUARDADO, JSON.stringify(d)); } catch (e) { /* sin almacenamiento: pide código cada vez */ }
+    try { localStorage.setItem(GUARDADO, JSON.stringify(d)); } catch (e) { /* sin almacenamiento: se empareja cada vez */ }
   };
 
-  let datos = leer();
-  if (location.hash === '#nuevo' || !datos || !codigoValido(datos.codigo)) {
-    datos = { codigo: nuevoCodigo(), emparejada: false };
-    guardar(datos);
-    if (location.hash) history.replaceState(null, '', location.pathname);
-  }
-
-  const emparejar = document.getElementById('emparejar');
+  const video = document.getElementById('video');
   const estado = document.getElementById('estado');
-  const mostrarCodigo = () => {
-    emparejar.hidden = datos.emparejada;
-    document.getElementById('codigo').textContent = datos.codigo.slice(0, 4) + ' ' + datos.codigo.slice(4);
-  };
-  mostrarCodigo();
+  const emparejar = document.getElementById('emparejar');
 
   const TEXTOS = {
     esperando: 'Esperando la transmisión…',
@@ -61,15 +50,33 @@
     conectado: '',
     reconectando: 'Se cortó la transmisión, reconectando…',
   };
-  recibir(document.getElementById('video'), datos.codigo, (s) => {
-    if (s === 'conectado' && !datos.emparejada) {
-      datos.emparejada = true;
-      guardar(datos);
-      mostrarCodigo();
-    }
-    estado.textContent = TEXTOS[s];
-    estado.hidden = s === 'conectado';
-  });
+
+  function transmitir(secreto) {
+    emparejar.hidden = true;
+    estado.hidden = false;
+    recibir(video, secreto, (s) => {
+      estado.textContent = TEXTOS[s];
+      estado.hidden = s === 'conectado';
+    });
+  }
+
+  function mostrarCodigo() {
+    const codigo = nuevoCodigo();
+    document.getElementById('codigo').textContent = codigo;
+    emparejar.hidden = false;
+    esperarEmparejamiento(codigo, (secreto) => {
+      guardar({ secreto });
+      transmitir(secreto);
+    });
+  }
+
+  if (location.hash === '#nuevo') {
+    guardar(null);
+    history.replaceState(null, '', location.pathname);
+  }
+  const datos = leer();
+  if (datos && secretoValido(datos.secreto)) transmitir(datos.secreto);
+  else mostrarCodigo();
 
   // Con el control remoto, cualquier tecla pasa a pantalla completa.
   const completa = () => {

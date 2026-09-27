@@ -95,9 +95,25 @@ if (EMITIR) iniciarEmision();
 async function iniciarEmision() {
   const aviso = document.getElementById('emision');
   aviso.hidden = false;
-  const { emitir, codigoValido } = await import('./stream.js');
-  const codigo = location.hash.slice(1);
-  if (!codigoValido(codigo)) {
+  const { emitir, emparejar, nuevoSecreto, secretoValido, codigoValido } = await import('./stream.js');
+  const GUARDADO = 'acuarella-tele-secreto';  // compartido con el panel (mismo origen)
+  let secreto = location.hash.slice(1);
+  if (secreto.startsWith('par-')) {
+    // #par-123: emparejar una tele nueva. Se reusa el secreto guardado, así las teles ya emparejadas siguen andando.
+    const codigo = secreto.slice(4);
+    if (!codigoValido(codigo)) {
+      aviso.textContent = 'El código de la tele son 3 cifras: abrí el emisor desde el panel.';
+      return;
+    }
+    try { secreto = localStorage.getItem(GUARDADO) || ''; } catch { secreto = ''; }
+    if (!secretoValido(secreto)) secreto = nuevoSecreto();
+    try { localStorage.setItem(GUARDADO, secreto); } catch { /* el panel no lo va a recordar */ }
+    history.replaceState(null, '', `${location.pathname}${location.search}#${secreto}`);  // recargar no re-empareja
+    emparejar(codigo, secreto, (ok) => {
+      if (!ok) aviso.textContent = `No apareció la tele ${codigo}: revisá que muestre ese código y volvé a abrir el emisor.`;
+    });
+  }
+  if (!secretoValido(secreto)) {
     aviso.textContent = 'Falta el código de la tele: abrí el emisor desde el panel.';
     return;
   }
@@ -113,7 +129,7 @@ async function iniciarEmision() {
     aviso.textContent = `${titulo} · ${detalle}`;
   };
   mostrar(0);
-  emitir(canvas, codigo, {
+  emitir(canvas, secreto, {
     fps,
     alCambiar: mostrar,
     alFallar: () => { fallo = true; mostrar(0); },

@@ -3,8 +3,8 @@
 // La computadora que dibuja abre el emisor (aquarium.html?emitir), captura su propio canvas y lo manda por WebRTC.
 // La tele abre tv.html y solo reproduce el video, así no necesita potencia para dibujar el arrecife.
 // Supabase Realtime es el punto de encuentro: por ahí pasan los mensajes que arman la conexión, pero el video va
-// directo de la computadora a la tele. El canal se nombra con el código de la tele; sin él no se puede ver ni
-// meterse en la transmisión.
+// directo de la computadora a la tele. La tele se empareja una vez con un código de 3 cifras que muestra en
+// pantalla; en ese paso recibe un secreto largo, que nombra el canal de la transmisión y nunca se muestra.
 //
 // Sintaxis conservadora a propósito (sin ?. ni ??, offer/answer explícitos): los navegadores de las teles suelen
 // ser Chromium viejos.
@@ -15,20 +15,32 @@ const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 const MAX_TELES = 3;
 const LETRAS = 'abcdefghjkmnpqrstuvwxyz23456789';  // sin i, l, o, 0 ni 1, que se confunden al tipear
 
-/** Código de 8 caracteres para emparejar una tele: unos 40 bits, no se adivina probando. */
+/** Secreto de un canal de transmisión: 16 caracteres (unos 80 bits). Nunca se muestra en pantalla. */
+export function nuevoSecreto() {
+  const azar = crypto.getRandomValues(new Uint8Array(16));
+  let secreto = '';
+  for (let i = 0; i < azar.length; i++) secreto += LETRAS[azar[i] % LETRAS.length];
+  return secreto;
+}
+
+export function secretoValido(secreto) {
+  return /^[a-hjkmnp-z2-9]{16}$/.test(secreto);
+}
+
+/**
+ * Código de emparejamiento: 3 cifras, fácil de tipear. Solo sirve mientras la tele lo muestra; la transmisión usa
+ * después el secreto largo, así que adivinar las 3 cifras no alcanza para ver ni para meterse en una tele emparejada.
+ */
 export function nuevoCodigo() {
-  const azar = crypto.getRandomValues(new Uint8Array(8));
-  let codigo = '';
-  for (let i = 0; i < azar.length; i++) codigo += LETRAS[azar[i] % LETRAS.length];
-  return codigo;
+  return String(crypto.getRandomValues(new Uint16Array(1))[0] % 1000).padStart(3, '0');
 }
 
 export function normalizarCodigo(texto) {
-  return String(texto || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return String(texto || '').replace(/[^0-9]/g, '');
 }
 
 export function codigoValido(codigo) {
-  return /^[a-hjkmnp-z2-9]{8}$/.test(codigo);
+  return /^[0-9]{3}$/.test(codigo);
 }
 
 const conectada = (pc) => pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed';
@@ -37,8 +49,8 @@ const conectada = (pc) => pc.iceConnectionState === 'connected' || pc.iceConnect
  * Canal de Supabase Realtime con el protocolo Phoenix, sin supabase-js. Se reconecta solo.
  * `alUnirse` corre cada vez que queda unido, también después de una reconexión.
  */
-function abrirCanal(codigo, alRecibir, alUnirse) {
-  const topic = 'realtime:tele-' + codigo;
+function abrirCanal(nombre, alRecibir, alUnirse) {
+  const topic = 'realtime:tele-' + nombre;
   const url = SUPABASE_URL.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' +
     encodeURIComponent(SUPABASE_KEY) + '&vsn=1.0.0';
   let ws = null, ref = 0, joinRef = null, latido = null, unido = false, cerrado = false;
@@ -112,10 +124,10 @@ function preferirH264(transceptor) {
 }
 
 /**
- * Emite `canvas` para las teles que se conecten con `codigo`.
+ * Emite `canvas` para las teles emparejadas con `secreto`.
  * `opciones`: { fps, bitrate, alCambiar(n) } — alCambiar informa cuántas teles están recibiendo.
  */
-export function emitir(canvas, codigo, opciones) {
+export function emitir(canvas, secreto, opciones) {
   const o = opciones || {};
   const fps = o.fps || 60, bitrate = o.bitrate || 25000000;
   const alCambiar = o.alCambiar || (() => {}), alFallar = o.alFallar || (() => {});
@@ -173,7 +185,7 @@ export function emitir(canvas, codigo, opciones) {
     }, 15000);
   }
 
-  const canal = abrirCanal(codigo, (m) => {
+  const canal = abrirCanal(secreto, (m) => {
     if (m.para !== 'emisor' || typeof m.de !== 'string') return;
     const pc = teles.get(m.de);
     if (m.tipo === 'hola') ofrecer(m.de).catch((err) => console.warn(err));
@@ -190,11 +202,11 @@ export function emitir(canvas, codigo, opciones) {
 }
 
 /**
- * Reproduce en `video` la transmisión de `codigo`. Pide video hasta que llega y, si se corta, lo vuelve a pedir.
+ * Reproduce en `video` la transmisión del canal `secreto`. Pide video hasta que llega y, si se corta, lo vuelve a pedir.
  * `alEstado` recibe 'esperando', 'conectando', 'bloqueada', 'conectado' o 'reconectando'.
  */
-export function recibir(video, codigo, alEstado) {
-  const yo = nuevoCodigo();
+export function recibir(video, secreto, alEstado) {
+  const yo = nuevoSecreto().slice(0, 12);
   const avisar = alEstado || (() => {});
   let pc = null, pedido = 0, caida = null, trabada = null, remotoListo = false, bloqueada = false;
   let iceEnEspera = [];
@@ -257,7 +269,7 @@ export function recibir(video, codigo, alEstado) {
     }, 15000);
   }
 
-  const canal = abrirCanal(codigo, (m) => {
+  const canal = abrirCanal(secreto, (m) => {
     if (m.tipo === 'emisor-listo') {
       if (!conectadaAhora()) pedir();  // el emisor recién se abrió
       return;
@@ -286,4 +298,39 @@ export function recibir(video, codigo, alEstado) {
       if (pc) pc.close();
     },
   };
+}
+
+/**
+ * Tele sin emparejar: escucha en el canal de su código de 3 cifras hasta que un emisor le mande el secreto largo.
+ */
+export function esperarEmparejamiento(codigo, alEmparejar) {
+  let hecho = false;
+  const canal = abrirCanal('par-' + codigo, (m) => {
+    if (hecho || m.tipo !== 'emparejar' || !secretoValido(m.secreto)) return;
+    hecho = true;
+    canal.enviar({ tipo: 'emparejada' });
+    setTimeout(() => canal.cerrar(), 1500);
+    alEmparejar(m.secreto);
+  }, () => {});
+  return { cerrar: () => canal.cerrar() };
+}
+
+/** Emisor: le manda `secreto` a la tele que muestra `codigo` hasta que confirme; se rinde a los 2 minutos. */
+export function emparejar(codigo, secreto, alTerminar) {
+  let listo = false;
+  const mandar = () => canal.enviar({ tipo: 'emparejar', secreto });
+  const canal = abrirCanal('par-' + codigo, (m) => {
+    if (m.tipo !== 'emparejada' || listo) return;
+    listo = true;
+    clearInterval(repetir);
+    setTimeout(() => canal.cerrar(), 1500);
+    alTerminar(true);
+  }, mandar);
+  const repetir = setInterval(mandar, 2000);
+  setTimeout(() => {
+    if (listo) return;
+    clearInterval(repetir);
+    canal.cerrar();
+    alTerminar(false);
+  }, 120000);
 }
