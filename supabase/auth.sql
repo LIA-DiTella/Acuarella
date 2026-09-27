@@ -4,6 +4,31 @@
 -- contraseña del equipo. El acuario sigue siendo anónimo: es la pantalla pública.
 -- Se puede ejecutar varias veces (psql o SQL Editor) sin romper nada.
 
+-- 0. Quién es operador ---------------------------------------------------------
+-- `authenticated` no alcanza: mientras el registro público de Supabase esté abierto, cualquiera puede crearse
+-- una cuenta y quedar autenticado. Los permisos se dan solo a las cuentas de esta tabla. No tiene políticas,
+-- así que el cliente no la puede leer ni escribir.
+create table if not exists public.operators (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  role    text not null check (role in ('admin', 'scanner')),  -- admin puede todo; scanner solo subir
+  note    text
+);
+alter table public.operators enable row level security;
+
+create or replace function public.is_operator(p_role text default null) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.operators o
+    where o.user_id = auth.uid() and (p_role is null or o.role = p_role or o.role = 'admin')
+  )
+$$;
+revoke all on function public.is_operator(text) from public, anon;
+grant execute on function public.is_operator(text) to authenticated;
+
+insert into public.operators (user_id, role, note)
+select id, 'admin', 'cuenta del equipo' from auth.users where email = 'labo@acuarella.app'
+on conflict (user_id) do nothing;
+
 -- 1. Escribir deja de estar permitido para anónimos ---------------------------
 revoke execute on function public.create_fish(text) from anon;
 revoke execute on function public.mark_uploaded(bigint) from anon;
@@ -16,7 +41,7 @@ grant execute on function public.fish_pending(text) to authenticated;
 drop policy if exists "fish: subir escaneos" on storage.objects;
 create policy "fish: subir escaneos" on storage.objects
   for insert to authenticated
-  with check (bucket_id = 'fish' and public.fish_pending(name));
+  with check (bucket_id = 'fish' and public.is_operator() and public.fish_pending(name));
 
 -- 2. Panel: sin clave como argumento, con sesión obligatoria -------------------
 -- La versión vieja recibía la clave en texto y la comparaba adentro; se reemplaza por completo.
@@ -29,8 +54,8 @@ returns table (id bigint, species text, filename text, created_at timestamptz,
                permanent boolean, active boolean, hidden boolean)
 language plpgsql security definer set search_path = public as $$
 begin
-  if auth.role() is distinct from 'authenticated' then
-    raise exception 'Hace falta iniciar sesión';
+  if not public.is_operator('admin') then
+    raise exception 'Sin permiso';
   end if;
   return query
     select f.id, f.species, f.filename, f.created_at, f.permanent, f.active, f.hidden
@@ -49,8 +74,8 @@ declare
   r public.fish;
   c public.aquarium_config;
 begin
-  if auth.role() is distinct from 'authenticated' then
-    raise exception 'Hace falta iniciar sesión';
+  if not public.is_operator('admin') then
+    raise exception 'Sin permiso';
   end if;
 
   update public.fish set
@@ -88,8 +113,8 @@ create or replace function public.admin_delete_fish(p_id bigint)
 returns boolean
 language plpgsql security definer set search_path = public as $$
 begin
-  if auth.role() is distinct from 'authenticated' then
-    raise exception 'Hace falta iniciar sesión';
+  if not public.is_operator('admin') then
+    raise exception 'Sin permiso';
   end if;
   delete from public.fish where id = p_id;
   return found;

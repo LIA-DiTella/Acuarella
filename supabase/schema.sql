@@ -75,6 +75,9 @@ language plpgsql security definer set search_path = public as $$
 declare
   r public.fish;
 begin
+  if not public.is_operator() then  -- definida en supabase/auth.sql
+    raise exception 'Sin permiso';
+  end if;
   if not exists (select 1 from public.species where id = p_species and enabled) then
     raise exception 'Especie desconocida: %', p_species;
   end if;
@@ -96,6 +99,9 @@ declare
   c public.aquarium_config;
   v_show boolean;
 begin
+  if not public.is_operator() then
+    raise exception 'Sin permiso';
+  end if;
   select * into r from public.fish where id = p_id;
   if r.id is null then
     raise exception 'No existe el pez %', p_id;
@@ -193,10 +199,7 @@ values ('fish', 'fish', true, 5242880, array['image/png'])
 on conflict (id) do update
   set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
-drop policy if exists "fish: subir escaneos" on storage.objects;
-create policy "fish: subir escaneos" on storage.objects
-  for insert to authenticated
-  with check (bucket_id = 'fish' and public.fish_pending(name));
+-- La política de subida vive en supabase/auth.sql, porque exige ser operador (public.is_operator).
 
 -- Rotación cada 2 h (horas pares UTC = impares en Argentina) -------------------
 create extension if not exists pg_cron with schema pg_catalog;
