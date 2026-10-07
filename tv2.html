@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Acuarella · Tele (prueba de video)</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none}
+*{cursor:none !important}
+video{position:fixed;top:0;left:0;width:100%;height:100%;background:#000}
+#e{position:fixed;left:24px;bottom:18px;color:#8fb3bf;font:22px sans-serif}
+</style>
+</head>
+<body>
+<video id="v" src="tv2/acuario.mp4" autoplay muted loop></video>
+<div id="e">Cargando el video...</div>
+<script>
+// Prueba: la tele reproduce un loop del acuario servido desde este sitio, sin pasar por la red local.
+// JavaScript simple a propósito: el navegador de la Samsung de 2016 no entiende el JavaScript moderno.
+var v = document.getElementById('v'), e = document.getElementById('e');
+v.addEventListener('playing', function () { e.style.display = 'none'; });
+v.addEventListener('ended', function () { v.currentTime = 0; v.play(); });
+v.addEventListener('error', function () {
+  e.style.display = 'block';
+  e.innerHTML = 'Error del video (' + (v.error ? v.error.code : '?') + '), reintentando...';
+  setTimeout(function () { v.load(); v.play(); }, 3000);
+});
+// Si el video se congela (el tiempo no avanza) durante ~12 s, se recarga solo.
+var ultimo = -1, quieto = 0;
+setInterval(function () {
+  if (v.paused) { try { v.play(); } catch (x) {} }
+  if (v.currentTime === ultimo) { quieto++; } else { quieto = 0; ultimo = v.currentTime; }
+  if (quieto >= 3) { quieto = 0; v.load(); try { v.play(); } catch (x) {} }
+}, 4000);
+</script>
+</body>
+</html>
